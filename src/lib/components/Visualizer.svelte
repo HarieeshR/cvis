@@ -21,6 +21,34 @@
     return !isArray(val) && !isStruct(val) && typeof val === "number" && val >= 256 && val < 0x10000;
   }
 
+  // Check if an array looks like a character array (string)
+  function isCharArray(name: string, arr: any[]): boolean {
+    // Check by name hints
+    const nameLower = name.toLowerCase();
+    if (nameLower.includes('str') || nameLower.includes('char') || 
+        nameLower.includes('name') || nameLower.includes('text') ||
+        nameLower.includes('buf') || nameLower.includes('msg')) {
+      return true;
+    }
+    // Check if values look like a null-terminated string (all printable + ends with 0)
+    if (arr.length > 0 && arr[arr.length - 1] === 0) {
+      const printable = arr.slice(0, -1).every((v: number) => v >= 32 && v < 127);
+      if (printable && arr.length > 1) return true;
+    }
+    return false;
+  }
+
+  // Format array value - show ASCII only for char arrays
+  function formatArrayValue(v: number, isCharArr: boolean): string {
+    if (isCharArr && v >= 32 && v < 127) {
+      return `'${String.fromCharCode(v)}'`;
+    }
+    if (isCharArr && v === 0) {
+      return '\\0';
+    }
+    return String(v);
+  }
+
   function displayValue(val: any): string {
     if (isArray(val)) return `[${val.length}]`;
     if (isStruct(val)) return "struct";
@@ -125,11 +153,12 @@
               </div>
               
               {#if isArr}
+                {@const isCharArr = isCharArray(varName, value)}
                 <div class="array-container">
                   {#each value as v, i}
                     <div class="array-cell">
                       <span class="array-index">{i}</span>
-                      <span class="array-value">{v > 31 && v < 127 ? `'${String.fromCharCode(v)}'` : v}</span>
+                      <span class="array-value">{formatArrayValue(v, isCharArr)}</span>
                     </div>
                   {/each}
                 </div>
