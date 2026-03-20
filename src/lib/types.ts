@@ -33,11 +33,17 @@ export interface TraceRequest {
   breakpoints?: number[];  // line numbers
 }
 
+export interface StackFrame {
+  name: string;
+  locals: Record<string, any>;
+}
+
 export interface TraceStep {
   stepNumber: number;
   lineNo: number;
   registers: Record<string, number>;
   memory: Record<string, any>;
+  stackFrames?: StackFrame[];  // Call stack with local variables
   instructionPointer: string;
   timestamp: number;
 }

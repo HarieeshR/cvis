@@ -3,7 +3,7 @@ import cors from 'cors';
 import { getGccPath, verifyGcc } from './lib/gcc-path.js';
 import { compileC } from './lib/compile-c.js';
 import { runBinary } from './lib/run-binary.js';
-import { traceExecution } from './lib/trace-execution.js';
+import { traceExecution } from './lib/c-interpreter.js';
 
 const app = express();
 const PORT = 3001;

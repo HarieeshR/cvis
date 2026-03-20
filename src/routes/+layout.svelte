@@ -52,6 +52,7 @@
       currentStep={$currentStepIndex}
       {isTracing}
       {traceErr}
+      sourceCode={$editorCode}
     />
   </div>
   <slot />

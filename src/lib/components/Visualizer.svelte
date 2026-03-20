@@ -1,670 +1,597 @@
 <script lang="ts">
-  import type { TraceStep } from '$lib/types';
+  import type { TraceStep, StackFrame } from '$lib/types';
 
   export let traceStep: TraceStep | null = null;
   export let sourceLines: string[] = [];
 
-  let prevMemory: Record<string, any> = {};
-  let prevRegisters: Record<string, any> = {};
+  // Track changes for highlighting
+  let prevFrames: StackFrame[] = [];
   let changedVars: Set<string> = new Set();
-  let changedRegs: Set<string> = new Set();
 
-  function isArray(val: any): boolean {
-    return Array.isArray(val);
+  // Separate heap objects (arrays, structs) from primitives
+  interface HeapObject {
+    id: string;
+    type: 'array' | 'struct';
+    values: any[];
+    fields?: Record<string, any>;
   }
 
-  function isStruct(val: any): boolean {
-    return val && typeof val === "object" && val.__type === "struct";
+  function isHeapObject(val: any): boolean {
+    return Array.isArray(val) || (val && typeof val === 'object');
   }
 
-  function isPointer(val: any): boolean {
-    return !isArray(val) && !isStruct(val) && typeof val === "number" && val >= 256 && val < 0x10000;
+  function getHeapId(frameName: string, varName: string): string {
+    return `${frameName}.${varName}`;
   }
 
-  // Check if an array looks like a character array (string)
-  function isCharArray(name: string, arr: any[]): boolean {
-    // Check by name hints
-    const nameLower = name.toLowerCase();
-    if (nameLower.includes('str') || nameLower.includes('char') || 
-        nameLower.includes('name') || nameLower.includes('text') ||
-        nameLower.includes('buf') || nameLower.includes('msg')) {
-      return true;
-    }
-    // Check if values look like a null-terminated string (all printable + ends with 0)
-    if (arr.length > 0 && arr[arr.length - 1] === 0) {
-      const printable = arr.slice(0, -1).every((v: number) => v >= 32 && v < 127);
-      if (printable && arr.length > 1) return true;
-    }
-    return false;
-  }
-
-  // Format array value - show ASCII only for char arrays
-  function formatArrayValue(v: number, isCharArr: boolean): string {
-    if (isCharArr && v >= 32 && v < 127) {
-      return `'${String.fromCharCode(v)}'`;
-    }
-    if (isCharArr && v === 0) {
-      return '\\0';
-    }
-    return String(v);
-  }
-
-  function displayValue(val: any): string {
-    if (isArray(val)) return `[${val.length}]`;
-    if (isStruct(val)) return "struct";
-    if (typeof val === "number") {
-      if (isPointer(val)) return `0x${val.toString(16)}`;
-      if (val === 0 && isPointer(val)) return "NULL";
-      return Number.isInteger(val) ? String(val) : val.toFixed(3);
-    }
-    if (typeof val === "string") return `"${val.slice(0, 10)}${val.length > 10 ? "..." : ""}"`;
-    return "?";
-  }
-
-  function detectChanges(current: Record<string, any>, prev: Record<string, any>): Set<string> {
-    const changed = new Set<string>();
-    for (const key of Object.keys(current)) {
-      if (JSON.stringify(current[key]) !== JSON.stringify(prev[key])) {
-        changed.add(key);
+  // Extract heap objects from all frames
+  function extractHeapObjects(frames: StackFrame[]): HeapObject[] {
+    const objects: HeapObject[] = [];
+    
+    for (const frame of frames) {
+      for (const [name, value] of Object.entries(frame.locals)) {
+        if (Array.isArray(value)) {
+          objects.push({
+            id: getHeapId(frame.name, name),
+            type: 'array',
+            values: value
+          });
+        } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+          objects.push({
+            id: getHeapId(frame.name, name),
+            type: 'struct',
+            values: [],
+            fields: value
+          });
+        }
       }
     }
+    
+    return objects;
+  }
+
+  // Detect which variables changed
+  function detectChanges(current: StackFrame[], prev: StackFrame[]): Set<string> {
+    const changed = new Set<string>();
+    
+    for (const frame of current) {
+      const prevFrame = prev.find(f => f.name === frame.name);
+      for (const [name, value] of Object.entries(frame.locals)) {
+        const prevVal = prevFrame?.locals[name];
+        if (JSON.stringify(value) !== JSON.stringify(prevVal)) {
+          changed.add(`${frame.name}.${name}`);
+        }
+      }
+    }
+    
     return changed;
   }
 
-  $: memoryEntries = traceStep ? Object.entries(traceStep.memory) : [];
-  $: registers = traceStep ? traceStep.registers : {};
+  // Format a primitive value for display
+  function formatValue(val: any): string {
+    if (val === null || val === undefined) return 'null';
+    if (typeof val === 'string') return `"${val}"`;
+    if (typeof val === 'number') {
+      if (Number.isInteger(val)) return String(val);
+      return val.toFixed(2);
+    }
+    return String(val);
+  }
+
+  // Check if value is a char (for array display)
+  function isCharValue(val: number): boolean {
+    return typeof val === 'number' && val >= 32 && val < 127;
+  }
+
+  $: stackFrames = traceStep?.stackFrames || [];
+  $: heapObjects = extractHeapObjects(stackFrames);
   $: currentLine = traceStep && sourceLines[traceStep.lineNo - 1]?.trim() || '';
   
-  $: if (traceStep) {
-    changedVars = detectChanges(traceStep.memory, prevMemory);
-    changedRegs = detectChanges(traceStep.registers, prevRegisters);
-    prevMemory = { ...traceStep.memory };
-    prevRegisters = { ...traceStep.registers };
+  $: if (traceStep?.stackFrames) {
+    changedVars = detectChanges(traceStep.stackFrames, prevFrames);
+    prevFrames = JSON.parse(JSON.stringify(traceStep.stackFrames));
   }
 </script>
 
-<div class="visualizer-container">
-  {#if !traceStep}
+<div class="visualizer">
+  {#if !traceStep || stackFrames.length === 0}
     <div class="empty-state">
       <div class="empty-icon">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4m0-6v6" />
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
         </svg>
       </div>
-      <div class="empty-title">No Trace Data</div>
-      <div class="empty-description">
-        Click <span class="accent-text">Trace Execution</span> to visualize program state
+      <h3>Ready to Visualize</h3>
+      <p>Click <strong>Trace Execution</strong> to see your program step by step</p>
+      <div class="features">
+        <span class="feature">📚 Call Stack</span>
+        <span class="feature">📦 Variables</span>
+        <span class="feature">🔗 Arrays & Pointers</span>
       </div>
     </div>
   {:else}
-    <div class="content-wrapper">
-      <!-- Registers Section -->
-      <section class="section registers-section">
-        <header class="section-header">
-          <span class="section-icon">⚙</span>
-          <span class="section-title">Registers</span>
-          <span class="section-count">{Object.keys(registers).length}</span>
-        </header>
-        <div class="registers-grid">
-          {#each Object.entries(registers) as [reg, value]}
-            {@const isChanged = changedRegs.has(reg)}
-            <div class="register-card" class:changed={isChanged}>
-              <div class="register-name">{reg}</div>
-              <div class="register-value" class:highlight={isChanged}>{value}</div>
-            </div>
-          {/each}
+    <div class="visualization-area">
+      <!-- Left Panel: Frames (Call Stack) -->
+      <div class="frames-panel">
+        <div class="panel-header">
+          <span class="panel-title">Frames</span>
+          <span class="panel-subtitle">Call Stack</span>
         </div>
-      </section>
-
-      <!-- Memory Section -->
-      <section class="section memory-section">
-        <header class="section-header">
-          <span class="section-icon">◈</span>
-          <span class="section-title">Variables & Memory</span>
-          <span class="section-count">{memoryEntries.length}</span>
-        </header>
-        <div class="memory-grid">
-          {#each memoryEntries as [varName, value]}
-            {@const isArr = isArray(value)}
-            {@const isStr = isStruct(value)}
-            {@const isPtr = isPointer(value)}
-            {@const disp = displayValue(value)}
-            {@const isChanged = changedVars.has(varName)}
-            
-            <div 
-              class="memory-card"
-              class:array-card={isArr}
-              class:struct-card={isStr}
-              class:pointer-card={isPtr}
-              class:scalar-card={!isArr && !isStr && !isPtr}
-              class:changed={isChanged}
-            >
-              <div class="var-header">
-                <span class="var-name" class:pointer={isPtr} class:array={isArr} class:struct={isStr}>
-                  {varName}
-                </span>
-                {#if isPtr}
-                  <span class="type-badge pointer-badge">PTR</span>
-                {:else if isArr}
-                  <span class="type-badge array-badge">ARR[{value.length}]</span>
-                {:else if isStr}
-                  <span class="type-badge struct-badge">STRUCT</span>
+        
+        <div class="frames-list">
+          {#each [...stackFrames].reverse() as frame, idx}
+            <div class="frame" class:active={idx === 0}>
+              <div class="frame-header">
+                <span class="frame-name">{frame.name}()</span>
+                {#if idx === 0}
+                  <span class="frame-badge">current</span>
                 {/if}
               </div>
               
-              {#if isArr}
-                {@const isCharArr = isCharArray(varName, value)}
-                <div class="array-container">
-                  {#each value as v, i}
-                    <div class="array-cell">
-                      <span class="array-index">{i}</span>
-                      <span class="array-value">{formatArrayValue(v, isCharArr)}</span>
-                    </div>
-                  {/each}
-                </div>
-              {:else if isStr}
-                <div class="struct-container">
-                  {#each Object.entries(value).filter(([k]) => !k.startsWith('__')) as [k, v]}
-                    <div class="struct-field">
-                      <span class="field-name">{k}</span>
-                      <span class="field-value" class:is-pointer={typeof v === 'number' && v >= 256}>
-                        {typeof v === 'number' && v >= 256 ? `→ 0x${v.toString(16)}` : String(v)}
+              <div class="frame-vars">
+                {#each Object.entries(frame.locals) as [varName, value]}
+                  {@const fullName = `${frame.name}.${varName}`}
+                  {@const isHeap = isHeapObject(value)}
+                  {@const isChanged = changedVars.has(fullName)}
+                  
+                  <div class="var-row" class:changed={isChanged}>
+                    <span class="var-name">{varName}</span>
+                    <span class="var-equals">=</span>
+                    {#if isHeap}
+                      <span class="var-ref" data-target={fullName}>
+                        <span class="ref-arrow">●→</span>
                       </span>
-                    </div>
-                  {/each}
+                    {:else}
+                      <span class="var-value" class:highlight={isChanged}>
+                        {formatValue(value)}
+                      </span>
+                    {/if}
+                  </div>
+                {/each}
+                
+                {#if Object.keys(frame.locals).length === 0}
+                  <div class="no-vars">no local variables</div>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Right Panel: Objects (Heap) -->
+      <div class="objects-panel">
+        <div class="panel-header">
+          <span class="panel-title">Objects</span>
+          <span class="panel-subtitle">Arrays & Structs</span>
+        </div>
+        
+        <div class="objects-list">
+          {#each heapObjects as obj}
+            <div class="heap-object" id={obj.id}>
+              {#if obj.type === 'array'}
+                <div class="array-object">
+                  <div class="array-label">{obj.id.split('.').pop()}</div>
+                  <div class="array-cells">
+                    {#each obj.values as val, i}
+                      <div class="array-cell">
+                        <span class="cell-index">{i}</span>
+                        <span class="cell-value">
+                          {isCharValue(val) ? `'${String.fromCharCode(val)}'` : val}
+                        </span>
+                      </div>
+                    {/each}
+                  </div>
                 </div>
-              {:else if isPtr}
-                <div class="pointer-value">
-                  <span class="pointer-arrow">→</span>
-                  <span class="pointer-addr">{disp}</span>
-                </div>
-              {:else}
-                <div class="scalar-value" class:highlight={isChanged}>
-                  {disp}
+              {:else if obj.type === 'struct'}
+                <div class="struct-object">
+                  <div class="struct-header">{obj.id.split('.').pop()}</div>
+                  <div class="struct-fields">
+                    {#each Object.entries(obj.fields || {}) as [fieldName, fieldVal]}
+                      <div class="struct-field">
+                        <span class="field-name">{fieldName}</span>
+                        <span class="field-value">{formatValue(fieldVal)}</span>
+                      </div>
+                    {/each}
+                  </div>
                 </div>
               {/if}
             </div>
           {/each}
+          
+          {#if heapObjects.length === 0}
+            <div class="no-objects">
+              <span>No arrays or structs yet</span>
+            </div>
+          {/if}
         </div>
-      </section>
+      </div>
+    </div>
 
-      <!-- Step Info Footer -->
-      <footer class="step-footer">
-        <div class="step-info-row">
-          <div class="step-badge">
-            <span class="step-label">Step</span>
-            <span class="step-value">{traceStep.stepNumber}</span>
-          </div>
-          <div class="step-badge">
-            <span class="step-label">Line</span>
-            <span class="step-value">{traceStep.lineNo}</span>
-          </div>
-          <div class="step-badge">
-            <span class="step-label">IP</span>
-            <span class="step-value mono">{traceStep.instructionPointer}</span>
-          </div>
-        </div>
-        {#if currentLine}
-          <div class="line-preview">
-            <code>{currentLine}</code>
-          </div>
-        {/if}
-      </footer>
+    <!-- Bottom: Current Line Info -->
+    <div class="step-info">
+      <span class="step-badge">Step {traceStep.stepNumber}</span>
+      <span class="line-badge">Line {traceStep.lineNo}</span>
+      {#if currentLine}
+        <code class="current-code">{currentLine}</code>
+      {/if}
     </div>
   {/if}
 </div>
 
 <style>
-  /* One Dark Color Palette */
-  :root {
-    --od-bg-main: #282c34;
-    --od-bg-deep: #21252b;
-    --od-bg-card: #2c313a;
-    --od-border: #3e4451;
-    --od-text: #abb2bf;
-    --od-text-dim: #5c6370;
-    --od-text-bright: #e5e5e5;
-    --od-green: #98c379;
-    --od-blue: #61afef;
-    --od-purple: #c678dd;
-    --od-cyan: #56b6c2;
-    --od-yellow: #e5c07b;
-    --od-orange: #d19a66;
-    --od-red: #e06c75;
-  }
-
-  .visualizer-container {
+  .visualizer {
     height: 100%;
-    overflow-y: auto;
-    padding: 16px;
-    background: var(--od-bg-main);
+    display: flex;
+    flex-direction: column;
+    background: #21252b;
+    color: #abb2bf;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
 
   /* Empty State */
   .empty-state {
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    padding: 40px 20px;
     text-align: center;
-    height: 100%;
-  }
-
-  .empty-icon {
-    color: var(--od-text-dim);
-    opacity: 0.5;
-  }
-
-  .empty-title {
-    color: var(--od-text-bright);
-    font-weight: 600;
-    font-size: 15px;
-  }
-
-  .empty-description {
-    font-size: 12px;
-    color: var(--od-text-dim);
-    max-width: 260px;
-    line-height: 1.6;
-  }
-
-  .accent-text {
-    color: var(--od-blue);
-    font-weight: 600;
-  }
-
-  /* Content Wrapper */
-  .content-wrapper {
-    display: flex;
-    flex-direction: column;
+    padding: 32px;
     gap: 16px;
   }
 
-  /* Sections */
-  .section {
-    background: linear-gradient(180deg, var(--od-bg-card) 0%, var(--od-bg-deep) 100%);
-    border: 1px solid var(--od-border);
-    border-radius: 10px;
-    padding: 14px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  .empty-icon {
+    color: #3e4451;
   }
 
-  .section-header {
+  .empty-state h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #e5e5e5;
+  }
+
+  .empty-state p {
+    margin: 0;
+    font-size: 14px;
+    color: #5c6370;
+  }
+
+  .empty-state strong {
+    color: #61afef;
+  }
+
+  .features {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--od-border);
+    gap: 12px;
+    margin-top: 8px;
   }
 
-  .section-icon {
+  .feature {
     font-size: 12px;
-    color: var(--od-blue);
+    padding: 4px 10px;
+    background: #282c34;
+    border-radius: 12px;
+    color: #abb2bf;
   }
 
-  .section-title {
-    color: var(--od-text);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
+  /* Main Visualization Area */
+  .visualization-area {
+    flex: 1;
+    display: flex;
+    gap: 1px;
+    background: #181a1f;
+    overflow: hidden;
   }
 
-  .section-count {
-    margin-left: auto;
-    background: var(--od-bg-deep);
-    color: var(--od-text-dim);
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 10px;
+  /* Panel Styles */
+  .frames-panel,
+  .objects-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #21252b;
+    min-width: 0;
   }
 
-  /* Registers */
-  .registers-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  .panel-header {
+    padding: 12px 16px;
+    background: #282c34;
+    border-bottom: 1px solid #3e4451;
+    display: flex;
+    align-items: baseline;
     gap: 8px;
   }
 
-  .register-card {
-    background: var(--od-bg-deep);
-    border: 1px solid var(--od-border);
-    border-radius: 8px;
-    padding: 10px;
-    transition: all 0.2s ease;
-  }
-
-  .register-card:hover {
-    border-color: var(--od-blue);
-    box-shadow: 0 0 0 1px var(--od-blue), 0 4px 12px rgba(97, 175, 239, 0.1);
-  }
-
-  .register-card.changed {
-    animation: pulse-green 0.5s ease;
-    border-color: var(--od-green);
-  }
-
-  .register-name {
-    color: var(--od-text-dim);
-    font-size: 10px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    margin-bottom: 4px;
+  .panel-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #e5e5e5;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
 
-  .register-value {
-    color: var(--od-text-bright);
-    font-size: 16px;
-    font-weight: 700;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    transition: color 0.2s;
+  .panel-subtitle {
+    font-size: 11px;
+    color: #5c6370;
   }
 
-  .register-value.highlight {
-    color: var(--od-green);
+  /* Frames List */
+  .frames-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
-  /* Memory Grid */
-  .memory-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-    gap: 10px;
-  }
-
-  /* Memory Cards */
-  .memory-card {
-    background: var(--od-bg-deep);
-    border: 1px solid var(--od-border);
+  .frame {
+    background: #282c34;
+    border: 1px solid #3e4451;
     border-radius: 8px;
-    padding: 10px 12px;
-    transition: all 0.2s ease;
+    overflow: hidden;
   }
 
-  .memory-card:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  .frame.active {
+    border-color: #61afef;
+    box-shadow: 0 0 0 1px #61afef20;
   }
 
-  .memory-card.changed {
-    animation: pulse-green 0.5s ease;
-  }
-
-  .memory-card.array-card,
-  .memory-card.struct-card {
-    grid-column: 1 / -1;
-  }
-
-  .memory-card.pointer-card {
-    border-left: 3px solid var(--od-purple);
-  }
-
-  .memory-card.pointer-card:hover {
-    border-color: var(--od-purple);
-    box-shadow: 0 0 0 1px var(--od-purple), 0 4px 12px rgba(198, 120, 221, 0.15);
-  }
-
-  .memory-card.array-card {
-    border-left: 3px solid var(--od-orange);
-  }
-
-  .memory-card.struct-card {
-    border-left: 3px solid var(--od-cyan);
-  }
-
-  .memory-card.scalar-card:hover {
-    border-color: var(--od-blue);
-  }
-
-  /* Variable Header */
-  .var-header {
+  .frame-header {
+    padding: 8px 12px;
+    background: #2c313a;
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
+    justify-content: space-between;
+    border-bottom: 1px solid #3e4451;
+  }
+
+  .frame-name {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: #61afef;
+  }
+
+  .frame-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    background: #61afef20;
+    color: #61afef;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .frame-vars {
+    padding: 8px 12px;
+  }
+
+  .var-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    transition: background 0.2s;
+  }
+
+  .var-row.changed {
+    background: #e5c07b15;
+    margin: 0 -12px;
+    padding: 4px 12px;
   }
 
   .var-name {
-    color: var(--od-text);
-    font-size: 11px;
+    color: #e5e5e5;
+    min-width: 60px;
+  }
+
+  .var-equals {
+    color: #5c6370;
+  }
+
+  .var-value {
+    color: #d19a66;
+  }
+
+  .var-value.highlight {
+    color: #e5c07b;
     font-weight: 600;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    letter-spacing: 0.3px;
   }
 
-  .var-name.pointer { color: var(--od-purple); }
-  .var-name.array { color: var(--od-orange); }
-  .var-name.struct { color: var(--od-cyan); }
-
-  .type-badge {
-    font-size: 9px;
-    font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
-    letter-spacing: 0.5px;
-  }
-
-  .pointer-badge {
-    color: var(--od-purple);
-    background: rgba(198, 120, 221, 0.15);
-  }
-
-  .array-badge {
-    color: var(--od-orange);
-    background: rgba(209, 154, 102, 0.15);
-  }
-
-  .struct-badge {
-    color: var(--od-cyan);
-    background: rgba(86, 182, 194, 0.15);
-  }
-
-  /* Scalar Value */
-  .scalar-value {
-    color: var(--od-text-bright);
-    font-size: 20px;
-    font-weight: 700;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    transition: color 0.2s;
-  }
-
-  .scalar-value.highlight {
-    color: var(--od-green);
-  }
-
-  /* Pointer Value */
-  .pointer-value {
+  .var-ref {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
   }
 
-  .pointer-arrow {
-    color: var(--od-purple);
-    font-size: 16px;
-    font-weight: 700;
-  }
-
-  .pointer-addr {
-    color: var(--od-purple);
+  .ref-arrow {
+    color: #c678dd;
     font-size: 14px;
-    font-weight: 600;
-    font-family: 'SF Mono', 'Fira Code', monospace;
   }
 
-  /* Array Container */
-  .array-container {
+  .no-vars {
+    font-size: 12px;
+    color: #5c6370;
+    font-style: italic;
+    padding: 4px 0;
+  }
+
+  /* Objects List */
+  .objects-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .heap-object {
+    background: #282c34;
+    border: 1px solid #3e4451;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  /* Array Object */
+  .array-object {
+    padding: 8px;
+  }
+
+  .array-label {
+    font-size: 11px;
+    color: #5c6370;
+    margin-bottom: 8px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .array-cells {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 2px;
   }
 
   .array-cell {
     display: flex;
     flex-direction: column;
     align-items: center;
-    background: var(--od-bg-main);
-    border: 1px solid var(--od-border);
+    min-width: 36px;
+    background: #2c313a;
+    border: 1px solid #3e4451;
     border-radius: 4px;
-    padding: 4px 6px;
-    min-width: 32px;
-    transition: all 0.15s ease;
+    overflow: hidden;
   }
 
-  .array-cell:hover {
-    border-color: var(--od-orange);
-    background: rgba(209, 154, 102, 0.08);
-  }
-
-  .array-index {
-    color: var(--od-text-dim);
+  .cell-index {
     font-size: 9px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: #5c6370;
+    padding: 2px 4px;
+    background: #21252b;
+    width: 100%;
+    text-align: center;
   }
 
-  .array-value {
-    color: var(--od-yellow);
+  .cell-value {
+    font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
-    font-weight: 600;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: #98c379;
+    padding: 4px 6px;
+    text-align: center;
   }
 
-  /* Struct Container */
-  .struct-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+  /* Struct Object */
+  .struct-object {
+    padding: 0;
+  }
+
+  .struct-header {
+    padding: 8px 12px;
+    background: #2c313a;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #56b6c2;
+    font-weight: 600;
+    border-bottom: 1px solid #3e4451;
+  }
+
+  .struct-fields {
+    padding: 8px 12px;
   }
 
   .struct-field {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--od-bg-main);
-    border: 1px solid var(--od-border);
-    border-radius: 4px;
-    padding: 5px 8px;
-    transition: all 0.15s ease;
-  }
-
-  .struct-field:hover {
-    border-color: var(--od-cyan);
+    justify-content: space-between;
+    padding: 4px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
   }
 
   .field-name {
-    color: var(--od-text-dim);
-    font-size: 10px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .field-name::after {
-    content: ':';
-    margin-left: 2px;
+    color: #abb2bf;
   }
 
   .field-value {
-    color: var(--od-text-bright);
-    font-size: 11px;
-    font-weight: 600;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: #d19a66;
   }
 
-  .field-value.is-pointer {
-    color: var(--od-purple);
-  }
-
-  /* Step Footer */
-  .step-footer {
-    background: linear-gradient(180deg, var(--od-bg-card) 0%, var(--od-bg-deep) 100%);
-    border: 1px solid var(--od-border);
-    border-radius: 10px;
-    padding: 12px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  }
-
-  .step-info-row {
+  .no-objects {
+    flex: 1;
     display: flex;
-    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    color: #5c6370;
+    font-size: 13px;
+  }
+
+  /* Step Info Bar */
+  .step-info {
+    padding: 10px 16px;
+    background: #282c34;
+    border-top: 1px solid #3e4451;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     flex-wrap: wrap;
   }
 
-  .step-badge {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--od-bg-deep);
-    border: 1px solid var(--od-border);
-    border-radius: 6px;
-    padding: 6px 10px;
-  }
-
-  .step-label {
-    color: var(--od-text-dim);
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .step-value {
-    color: var(--od-text-bright);
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .step-value.mono {
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .line-preview {
-    margin-top: 10px;
-    padding: 8px 10px;
-    background: var(--od-bg-deep);
-    border: 1px solid var(--od-border);
-    border-left: 3px solid var(--od-blue);
-    border-radius: 6px;
-    overflow-x: auto;
-  }
-
-  .line-preview code {
-    color: var(--od-text);
+  .step-badge,
+  .line-badge {
     font-size: 11px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    white-space: pre;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
   }
 
-  /* Animations */
-  @keyframes pulse-green {
-    0% {
-      box-shadow: 0 0 0 0 rgba(152, 195, 121, 0.4);
-    }
-    50% {
-      box-shadow: 0 0 0 4px rgba(152, 195, 121, 0.2);
-    }
-    100% {
-      box-shadow: 0 0 0 0 rgba(152, 195, 121, 0);
-    }
+  .step-badge {
+    background: #61afef20;
+    color: #61afef;
   }
 
-  /* Scrollbar Styling */
-  .visualizer-container::-webkit-scrollbar {
+  .line-badge {
+    background: #98c37920;
+    color: #98c379;
+  }
+
+  .current-code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #abb2bf;
+    background: #21252b;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid #3e4451;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Scrollbar */
+  .frames-list::-webkit-scrollbar,
+  .objects-list::-webkit-scrollbar {
     width: 8px;
   }
 
-  .visualizer-container::-webkit-scrollbar-track {
-    background: var(--od-bg-deep);
+  .frames-list::-webkit-scrollbar-track,
+  .objects-list::-webkit-scrollbar-track {
+    background: #21252b;
   }
 
-  .visualizer-container::-webkit-scrollbar-thumb {
-    background: var(--od-border);
+  .frames-list::-webkit-scrollbar-thumb,
+  .objects-list::-webkit-scrollbar-thumb {
+    background: #3e4451;
     border-radius: 4px;
   }
 
-  .visualizer-container::-webkit-scrollbar-thumb:hover {
-    background: var(--od-text-dim);
+  .frames-list::-webkit-scrollbar-thumb:hover,
+  .objects-list::-webkit-scrollbar-thumb:hover {
+    background: #5c6370;
   }
 </style>

@@ -15,9 +15,11 @@
   export let currentStep: number = 0;
   export let isTracing = false;
   export let traceErr: string | null = null;
+  export let sourceCode: string = '';
 
   let activeTab: RightPaneTabId = 'output';
 
+  $: sourceLines = sourceCode.split('\n');
   $: output = $lastExecutionResult
     ? $lastExecutionResult.stdout + $lastExecutionResult.stderr
     : $lastCompileResult
