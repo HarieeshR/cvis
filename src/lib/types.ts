@@ -48,9 +48,15 @@ export interface RunSessionInputResult {
   error?: string;
 }
 
+export interface RunSessionEofResult {
+  success: boolean;
+  error?: string;
+}
+
 export interface RunSessionPollResult {
   success: boolean;
   sessionId: string;
+  output: string;
   stdout: string;
   stderr: string;
   done: boolean;

@@ -27,6 +27,7 @@ export const lastCompileResult = writable<CompileResult | null>(null);
 export const lastExecutionResult = writable<ExecutionResult | null>(null);
 export const errorMessage = writable<string | null>(null);
 export const runSessionId = writable<string | null>(null);
+export const runConsoleTranscript = writable<string>('');
 
 // Derived state
 export const currentTraceStep = derived(
