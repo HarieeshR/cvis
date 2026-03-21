@@ -1,6 +1,5 @@
 import { writable, derived } from 'svelte/store';
 import type { TraceStep, CompileResult, ExecutionResult } from './types';
-import type { LanguageId } from './languages';
 
 // Editor state
 export const editorCode = writable<string>(`#include <stdio.h>
@@ -13,7 +12,6 @@ int main() {
 
 export const cursorLine = writable<number>(1);
 export const cursorColumn = writable<number>(0);
-export const selectedLanguage = writable<LanguageId>('c');
 
 // Visualizer state
 export const traceSteps = writable<TraceStep[]>([]);
@@ -30,25 +28,6 @@ export const lastExecutionResult = writable<ExecutionResult | null>(null);
 export const errorMessage = writable<string | null>(null);
 export const runSessionId = writable<string | null>(null);
 export const runConsoleTranscript = writable<string>('');
-
-// Learning flow state
-export type RightPaneTab = 'output' | 'visualizer' | 'analysis';
-export const activeRightPaneTab = writable<RightPaneTab>('output');
-export const selectedPracticeProblemId = writable<string | null>(null);
-export const activeMilestoneIndex = writable<number>(0);
-export const milestoneProgress = writable<Record<string, boolean>>({});
-
-// Data-safety and sync state
-export type SyncStatus = 'local-only' | 'saved' | 'conflict';
-export interface SyncConflictState {
-  incomingCode: string;
-  incomingUpdatedAt: number;
-  incomingClientId: string;
-}
-export const syncStatus = writable<SyncStatus>('local-only');
-export const syncConflict = writable<SyncConflictState | null>(null);
-export const lastAutosaveAt = writable<number | null>(null);
-export const backupSnapshotCount = writable<number>(0);
 
 // Derived state
 export const currentTraceStep = derived(

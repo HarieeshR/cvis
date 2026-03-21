@@ -4,7 +4,7 @@
   import EditorPane from '$lib/components/EditorPane.svelte';
   import HeaderBar from '$lib/components/HeaderBar.svelte';
   import RightPane from '$lib/components/RightPane.svelte';
-  import { runCompileAction, runRunAction, runTraceAction } from '$lib/layout/run-actions';
+  import { runCompileAndRunAction, runTraceAction } from '$lib/layout/run-actions';
   import {
     editorCode,
     traceSteps,
@@ -14,18 +14,10 @@
   let isTracing = false;
   let traceErr: string | null = null;
 
-  async function handleCompile() {
+  async function handleCompileAndRun() {
     if (!browser) return;
 
-    await runCompileAction({
-      code: $editorCode
-    });
-  }
-
-  async function handleRun() {
-    if (!browser) return;
-
-    await runRunAction({
+    await runCompileAndRunAction({
       code: $editorCode
     });
   }
@@ -46,17 +38,14 @@
 </script>
 
 <div class="app">
-  <HeaderBar />
+  <HeaderBar code={$editorCode} on:run={handleCompileAndRun} />
   <div class="main">
-    <EditorPane />
+    <EditorPane on:trace={handleTrace} />
     <RightPane
       traceSteps={$traceSteps}
       currentStep={$currentStepIndex}
       {isTracing}
       {traceErr}
-      on:compile={handleCompile}
-      on:run={handleRun}
-      on:trace={handleTrace}
     />
   </div>
   <slot />

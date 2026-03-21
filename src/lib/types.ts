@@ -1,9 +1,7 @@
-import type { LanguageId } from './languages';
-
 // ===== COMPILATION =====
 export interface CompileRequest {
   code: string;
-  language?: LanguageId;
+  language?: string;
 }
 
 export interface CompileResult {
@@ -127,7 +125,7 @@ export interface CodeAnalysis {
 // ===== APPLICATION STATE =====
 export interface EditorState {
   code: string;
-  language: LanguageId;
+  language: 'c';
   cursorLine: number;
   cursorColumn: number;
   isModified: boolean;
