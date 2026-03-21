@@ -1,7 +1,13 @@
 import { getGccPath } from '../lib/gcc-path.js';
 import { compileC } from '../lib/compile-c.js';
 import { runBinary } from '../lib/run-binary.js';
-import { pollRunSession, sendRunInput, startRunSession, stopRunSession } from '../lib/run-session.js';
+import {
+  closeRunInput,
+  pollRunSession,
+  sendRunInput,
+  startRunSession,
+  stopRunSession
+} from '../lib/run-session.js';
 import { traceExecution } from '../lib/c-interpreter.js';
 import {
   getErrorMessage,
@@ -182,6 +188,7 @@ export function registerRoutes(app) {
     return res.json({
       success: true,
       sessionId: result.sessionId,
+      output: result.output,
       stdout: result.stdout,
       stderr: result.stderr,
       done: result.done,
@@ -197,6 +204,20 @@ export function registerRoutes(app) {
     }
 
     const result = sendRunInput(sessionId, input);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+
+    return res.json(result);
+  });
+
+  app.post('/api/run/eof', (req, res) => {
+    const { sessionId } = req.body;
+    if (typeof sessionId !== 'string' || !sessionId.trim()) {
+      return res.status(400).json({ success: false, error: 'sessionId is required' });
+    }
+
+    const result = closeRunInput(sessionId);
     if (!result.success) {
       return res.status(400).json(result);
     }

@@ -151,6 +151,53 @@ function tokenize(code) {
   return tokens;
 }
 
+function evalConstExpr(expr, defines) {
+  const substituted = expr.replace(/[A-Za-z_]\w*/g, (name) => {
+    if (name in defines) {
+      return String(defines[name]);
+    }
+    return name;
+  });
+
+  try {
+    if (/^[\d\s+\-*/()%.]+$/.test(substituted)) {
+      const result = Function(`"use strict"; return (${substituted});`)();
+      if (typeof result === 'number' && Number.isFinite(result)) {
+        return Math.trunc(result);
+      }
+    }
+  } catch {
+    // Fallback to integer parse below.
+  }
+
+  const num = Number.parseInt(expr, 10);
+  return Number.isNaN(num) ? null : num;
+}
+
+function applyDefines(tokens) {
+  const defines = {};
+
+  for (const tok of tokens) {
+    if (tok.type !== 'PREP') continue;
+
+    const match = tok.value.match(/^#?\s*define\s+([A-Za-z_]\w*)\s+(.+)$/);
+    if (!match) continue;
+
+    const [, name, rawExpr] = match;
+    const value = evalConstExpr(rawExpr.trim(), defines);
+    if (value !== null) {
+      defines[name] = value;
+    }
+  }
+
+  return tokens.map((tok) => {
+    if (tok.type === 'ID' && tok.value in defines) {
+      return { ...tok, type: 'NUM', value: defines[tok.value] };
+    }
+    return tok;
+  });
+}
+
 // ============================================================================
 // PARSER
 // ============================================================================
@@ -228,14 +275,14 @@ class Parser {
 
     // Array declaration
     if (this.match('OP', '[')) {
-      const size = this.peek().type === 'NUM' ? this.advance().value : 0;
+      const sizeExpr = this.peek().value !== ']' ? this.parseExpression() : null;
       this.expect('OP', ']');
       let init = null;
       if (this.match('OP', '=')) {
         init = this.parseInitializer();
       }
       this.expect('OP', ';');
-      return { type: 'ArrayDecl', varType: typeName, name, size, init, line };
+      return { type: 'ArrayDecl', varType: typeName, name, sizeExpr, init, line };
     }
 
     // Variable declaration
@@ -271,6 +318,10 @@ class Parser {
     const params = [];
     if (this.peek().value !== ')') {
       do {
+        if (this.peek().value === 'void' && this.peek(1).value === ')') {
+          this.advance();
+          break;
+        }
         let ptype = this.parseType();
         while (this.match('OP', '*')) ptype += '*';
         const pname = this.match('ID')?.value || '';
@@ -658,11 +709,14 @@ class Interpreter {
       fp: this.callStack.length > 0 ? 4096 - (this.callStack.length - 1) * 64 : 4096
     };
 
-    // Build call stack representation
-    const stackFrames = this.callStack.map(frame => ({
-      name: frame.name,
-      locals: { ...frame.locals }
-    }));
+    // Build call stack representation (include globals as a pseudo-frame)
+    const stackFrames = [
+      { name: 'global', locals: { ...this.globalVars } },
+      ...this.callStack.map(frame => ({
+        name: frame.name,
+        locals: { ...frame.locals }
+      }))
+    ];
 
     this.steps.push({
       stepNumber: this.steps.length + 1,
@@ -730,7 +784,12 @@ class Interpreter {
 
       case 'ArrayDecl': {
         this.recordStep(node.line, `Array declaration: ${node.name}`);
-        const size = node.size || (node.init?.elements?.length || 0);
+        const declaredSize = node.sizeExpr
+          ? Math.max(0, Math.trunc(this.evaluate(node.sizeExpr)))
+          : Number.isFinite(node.size)
+            ? Math.max(0, Math.trunc(node.size))
+            : 0;
+        const size = declaredSize || (node.init?.elements?.length || 0);
         const arr = new Array(size).fill(0);
         if (node.init?.elements) {
           for (let i = 0; i < node.init.elements.length && i < size; i++) {
@@ -844,22 +903,28 @@ class Interpreter {
 
       case 'Binary': {
         const left = this.evaluate(node.left);
-        const right = this.evaluate(node.right);
         switch (node.op) {
-          case '+': return left + right;
-          case '-': return left - right;
-          case '*': return left * right;
-          case '/': return right === 0 ? 0 : Math.trunc(left / right);
-          case '%': return right === 0 ? 0 : left % right;
-          case '<': return left < right ? 1 : 0;
-          case '>': return left > right ? 1 : 0;
-          case '<=': return left <= right ? 1 : 0;
-          case '>=': return left >= right ? 1 : 0;
-          case '==': return left === right ? 1 : 0;
-          case '!=': return left !== right ? 1 : 0;
-          case '&&': return (left && right) ? 1 : 0;
-          case '||': return (left || right) ? 1 : 0;
-          default: return 0;
+          case '&&':
+            return left ? (this.evaluate(node.right) ? 1 : 0) : 0;
+          case '||':
+            return left ? 1 : (this.evaluate(node.right) ? 1 : 0);
+          default: {
+            const right = this.evaluate(node.right);
+            switch (node.op) {
+              case '+': return left + right;
+              case '-': return left - right;
+              case '*': return left * right;
+              case '/': return right === 0 ? 0 : Math.trunc(left / right);
+              case '%': return right === 0 ? 0 : left % right;
+              case '<': return left < right ? 1 : 0;
+              case '>': return left > right ? 1 : 0;
+              case '<=': return left <= right ? 1 : 0;
+              case '>=': return left >= right ? 1 : 0;
+              case '==': return left === right ? 1 : 0;
+              case '!=': return left !== right ? 1 : 0;
+              default: return 0;
+            }
+          }
         }
       }
 
@@ -933,10 +998,21 @@ class Interpreter {
           const args = node.args.slice(1).map(a => this.evaluate(a));
           let output = String(fmt);
           let argIdx = 0;
-          output = output.replace(/%[difs]/g, () => {
-            return args[argIdx++] ?? '';
+          output = output.replace(/%[difsc%]/g, (spec) => {
+            if (spec === '%%') return '%';
+            const value = args[argIdx++];
+            if (spec === '%c') {
+              return typeof value === 'number' ? String.fromCharCode(value) : String(value ?? '');
+            }
+            return value ?? '';
           });
           this.output += output;
+          return output.length;
+        }
+
+        if (funcName === 'puts') {
+          const text = node.args[0] ? this.evaluate(node.args[0]) : '';
+          this.output += `${String(text)}\n`;
           return 0;
         }
         
@@ -955,6 +1031,7 @@ class Interpreter {
         // Bind parameters
         for (let i = 0; i < func.params.length; i++) {
           const param = func.params[i];
+          if (!param.name) continue;
           const argVal = i < node.args.length ? this.evaluate(node.args[i]) : 0;
           frame.locals[param.name] = argVal;
         }
@@ -984,7 +1061,8 @@ class Interpreter {
 
 export async function traceExecution(code, breakpoints = []) {
   try {
-    const tokens = tokenize(code);
+    const rawTokens = tokenize(code);
+    const tokens = applyDefines(rawTokens);
     const parser = new Parser(tokens);
     const ast = parser.parseProgram();
     const interpreter = new Interpreter(ast);
