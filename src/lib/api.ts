@@ -1,4 +1,16 @@
-import type { CompileRequest, CompileResult, ExecutionRequest, ExecutionResult, TraceRequest, TraceResult } from './types';
+import type {
+  CompileRequest,
+  CompileResult,
+  ExecutionRequest,
+  ExecutionResult,
+  RunSessionInputRequest,
+  RunSessionInputResult,
+  RunSessionPollResult,
+  RunSessionStartRequest,
+  RunSessionStartResult,
+  TraceRequest,
+  TraceResult
+} from './types';
 
 const API_BASE = '';
 
@@ -42,4 +54,63 @@ export async function traceCode(req: TraceRequest): Promise<TraceResult> {
     throw new Error(`Trace failed: ${error}`);
   }
   return res.json();
+}
+
+export async function startRunSession(req: RunSessionStartRequest): Promise<RunSessionStartResult> {
+  const res = await fetch(`${API_BASE}/api/run/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req)
+  });
+
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.success) {
+    const message = body?.error || res.statusText || 'Failed to start run session';
+    throw new Error(`Run session start failed: ${message}`);
+  }
+
+  return body;
+}
+
+export async function pollRunSession(sessionId: string): Promise<RunSessionPollResult> {
+  const params = new URLSearchParams({ sessionId });
+  const res = await fetch(`${API_BASE}/api/run/poll?${params.toString()}`);
+
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.success) {
+    const message = body?.error || res.statusText || 'Failed to poll run session';
+    throw new Error(`Run session poll failed: ${message}`);
+  }
+
+  return body;
+}
+
+export async function sendRunInput(req: RunSessionInputRequest): Promise<RunSessionInputResult> {
+  const res = await fetch(`${API_BASE}/api/run/input`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req)
+  });
+
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.success) {
+    const message = body?.error || res.statusText || 'Failed to send run input';
+    throw new Error(`Run session input failed: ${message}`);
+  }
+
+  return body;
+}
+
+export async function stopRunSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/run/stop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId })
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const message = body?.error || res.statusText || 'Failed to stop run session';
+    throw new Error(`Run session stop failed: ${message}`);
+  }
 }

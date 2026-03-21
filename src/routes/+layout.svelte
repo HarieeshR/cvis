@@ -7,9 +7,6 @@
   import { runCompileAndRunAction, runTraceAction } from '$lib/layout/run-actions';
   import {
     editorCode,
-    hasScannedInput,
-    runtimeInput,
-    scannedInput,
     traceSteps,
     currentStepIndex
   } from '$lib/stores';
@@ -21,10 +18,7 @@
     if (!browser) return;
 
     await runCompileAndRunAction({
-      code: $editorCode,
-      runtimeInput: $runtimeInput,
-      scannedInput: $scannedInput,
-      hasScannedInput: $hasScannedInput
+      code: $editorCode
     });
   }
 
@@ -52,7 +46,6 @@
       currentStep={$currentStepIndex}
       {isTracing}
       {traceErr}
-      sourceCode={$editorCode}
     />
   </div>
   <slot />

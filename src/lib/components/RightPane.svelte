@@ -1,25 +1,26 @@
 <script lang="ts">
-  import { AlertTriangle, Cpu, Loader2, Scan, Check, Code2 } from 'lucide-svelte';
+  import { AlertTriangle, Cpu, Loader2, Code2 } from 'lucide-svelte';
   import Visualizer from './Visualizer.svelte';
   import type { TraceStep } from '$lib/types';
   import {
-    hasScannedInput,
+    isRunning,
     lastCompileResult,
-    lastExecutionResult,
-    runtimeInput,
-    scannedInput
+    lastExecutionResult
   } from '$lib/stores';
+  import { sendRuntimeInputLine } from '$lib/layout/run-actions';
   import { RIGHT_PANE_TABS, type RightPaneTabId, VISUALIZER_FEATURES } from './right-pane-config';
 
   export let traceSteps: TraceStep[] = [];
   export let currentStep: number = 0;
   export let isTracing = false;
   export let traceErr: string | null = null;
-  export let sourceCode: string = '';
 
   let activeTab: RightPaneTabId = 'output';
+  let terminalInput = '';
+  let terminalSending = false;
+  let outputRef: HTMLDivElement;
+  let prevOutput = '';
 
-  $: sourceLines = sourceCode.split('\n');
   $: output = $lastExecutionResult
     ? $lastExecutionResult.stdout + $lastExecutionResult.stderr
     : $lastCompileResult
@@ -28,10 +29,27 @@
 
   $: hasError = $lastExecutionResult?.stderr || $lastCompileResult?.errors?.length;
   $: currentTraceStepData = traceSteps[currentStep] || null;
+  $: if (outputRef && output !== prevOutput) {
+    prevOutput = output;
+    queueMicrotask(() => {
+      if (outputRef) {
+        outputRef.scrollTop = outputRef.scrollHeight;
+      }
+    });
+  }
 
-  function handleScanInput() {
-    scannedInput.set($runtimeInput);
-    hasScannedInput.set(true);
+  async function handleTerminalSubmit() {
+    if (!$isRunning || terminalSending) return;
+
+    terminalSending = true;
+    try {
+      await sendRuntimeInputLine(terminalInput);
+      terminalInput = '';
+    } catch (err) {
+      console.error('Failed to send runtime input:', err);
+    } finally {
+      terminalSending = false;
+    }
   }
 </script>
 
@@ -56,8 +74,8 @@
   <!-- Content Area -->
   <div class="content-area">
     {#if activeTab === 'output'}
-      <div class="output-panel">
-        <div class="output-content">
+      <div class="output-panel terminal-panel">
+        <div bind:this={outputRef} class="output-content terminal-output">
           {#if output}
             <pre class="output-text" class:error-output={hasError}>{output}</pre>
           {:else}
@@ -68,34 +86,24 @@
             </div>
           {/if}
         </div>
-      </div>
-    {/if}
-
-    {#if activeTab === 'input'}
-      <div class="input-panel">
-        <div class="input-header">
-          <button class="scan-btn" on:click={handleScanInput}>
-            <Scan size={14} />
-            <span>Scan Input</span>
+        <form class="terminal-input-row" on:submit|preventDefault={handleTerminalSubmit}>
+          <span class="terminal-prompt">stdin &gt;</span>
+          <input
+            class="terminal-input"
+            type="text"
+            bind:value={terminalInput}
+            placeholder={$isRunning ? 'Type input and press Enter' : 'Run program to enable stdin'}
+            disabled={!$isRunning || terminalSending}
+            autocomplete="off"
+          />
+          <button
+            type="submit"
+            class="terminal-send"
+            disabled={!$isRunning || terminalSending}
+          >
+            {terminalSending ? '...' : 'Send'}
           </button>
-          <div class="scan-status" class:captured={$hasScannedInput}>
-            {#if $hasScannedInput}
-              <Check size={12} />
-              <span>Input captured</span>
-            {:else}
-              <span>Not scanned</span>
-            {/if}
-          </div>
-        </div>
-        <div class="textarea-wrapper" class:captured={$hasScannedInput}>
-          <textarea
-            bind:value={$runtimeInput}
-            on:input={() => hasScannedInput.set(false)}
-            placeholder="Enter stdin input for scanf()..."
-            spellcheck="false"
-            class="input-textarea"
-          ></textarea>
-        </div>
+        </form>
       </div>
     {/if}
 
@@ -121,7 +129,7 @@
           </div>
         </div>
       {:else if traceSteps && traceSteps.length > 0}
-        <Visualizer traceStep={currentTraceStepData} sourceLines={sourceLines} />
+        <Visualizer traceStep={currentTraceStepData} />
       {:else}
         <div class="empty-visualizer">
           <div class="viz-icon-wrapper">
@@ -254,12 +262,80 @@
   /* Output Panel */
   .output-panel {
     height: 100%;
-    overflow-y: auto;
     padding: 16px;
+    overflow: hidden;
   }
 
   .output-content {
     min-height: 100%;
+  }
+
+  .terminal-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .terminal-output {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .terminal-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--od-bg-deep);
+    border: 1px solid var(--od-border);
+    border-radius: 8px;
+    padding: 8px;
+    flex-shrink: 0;
+  }
+
+  .terminal-prompt {
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+    font-size: 11px;
+    color: var(--od-green);
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+
+  .terminal-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--od-text-bright);
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+    font-size: 12px;
+    outline: none;
+  }
+
+  .terminal-input::placeholder {
+    color: var(--od-text-dim);
+  }
+
+  .terminal-send {
+    border: 1px solid var(--od-border);
+    background: var(--od-bg-main);
+    color: var(--od-text);
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .terminal-send:hover:not(:disabled) {
+    border-color: var(--od-blue);
+    color: var(--od-text-bright);
+  }
+
+  .terminal-send:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .output-text {
@@ -308,100 +384,6 @@
   .empty-hint {
     font-size: 12px;
     color: var(--od-text-dim);
-  }
-
-  /* Input Panel */
-  .input-panel {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .input-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--od-border);
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    background: var(--od-bg-deep);
-  }
-
-  .scan-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
-    background: linear-gradient(135deg, var(--od-blue), color-mix(in srgb, var(--od-blue) 80%, var(--od-purple)));
-    border: none;
-    border-radius: 6px;
-    color: var(--od-bg-deep);
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px color-mix(in srgb, var(--od-blue) 30%, transparent);
-  }
-
-  .scan-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--od-blue) 40%, transparent);
-  }
-
-  .scan-btn:active {
-    transform: translateY(0);
-  }
-
-  .scan-status {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--od-text-dim);
-    padding: 4px 10px;
-    border-radius: 12px;
-    background: var(--od-bg-hover);
-    transition: all 0.3s ease;
-  }
-
-  .scan-status.captured {
-    color: var(--od-green);
-    background: color-mix(in srgb, var(--od-green) 12%, var(--od-bg-hover));
-  }
-
-  .textarea-wrapper {
-    flex: 1;
-    padding: 12px;
-    transition: all 0.3s ease;
-  }
-
-  .textarea-wrapper.captured {
-    background: color-mix(in srgb, var(--od-green) 3%, transparent);
-  }
-
-  .input-textarea {
-    width: 100%;
-    height: 100%;
-    padding: 14px;
-    background: var(--od-bg-deep);
-    color: var(--od-text-bright);
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 13px;
-    line-height: 1.6;
-    resize: none;
-    outline: none;
-    border: 1px solid var(--od-border);
-    border-radius: 8px;
-    box-sizing: border-box;
-    transition: border-color 0.2s ease;
-  }
-
-  .input-textarea::placeholder {
-    color: var(--od-text-dim);
-  }
-
-  .input-textarea:focus {
-    border-color: var(--od-blue);
   }
 
   /* Visualizer States */

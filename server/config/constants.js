@@ -16,5 +16,7 @@ export const COMPILATION_LIMITS = Object.freeze({
 
 export const EXECUTION_LIMITS = Object.freeze({
   timeoutMs: 5_000,
-  outputBytes: 1024 * 1024
+  outputBytes: 1024 * 1024,
+  sessionRetentionMs: 60_000,
+  maxSessions: 25
 });

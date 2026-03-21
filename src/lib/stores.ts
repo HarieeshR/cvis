@@ -26,9 +26,7 @@ export const lastBinaryPath = writable<string | null>(null);
 export const lastCompileResult = writable<CompileResult | null>(null);
 export const lastExecutionResult = writable<ExecutionResult | null>(null);
 export const errorMessage = writable<string | null>(null);
-export const runtimeInput = writable<string>('');
-export const scannedInput = writable<string>('');
-export const hasScannedInput = writable<boolean>(false);
+export const runSessionId = writable<string | null>(null);
 
 // Derived state
 export const currentTraceStep = derived(

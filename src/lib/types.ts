@@ -27,6 +27,38 @@ export interface ExecutionResult {
   executionTime: number;
 }
 
+export interface RunSessionStartRequest {
+  binaryPath: string;
+  args?: string[];
+}
+
+export interface RunSessionStartResult {
+  success: boolean;
+  sessionId?: string;
+  error?: string;
+}
+
+export interface RunSessionInputRequest {
+  sessionId: string;
+  input: string;
+}
+
+export interface RunSessionInputResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface RunSessionPollResult {
+  success: boolean;
+  sessionId: string;
+  stdout: string;
+  stderr: string;
+  done: boolean;
+  exitCode: number | null;
+  executionTime: number;
+  error?: string;
+}
+
 // ===== TRACING =====
 export interface TraceRequest {
   code: string;

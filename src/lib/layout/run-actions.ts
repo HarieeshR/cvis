@@ -1,4 +1,11 @@
-import { compileCode, runBinary, traceCode } from '$lib/api';
+import {
+  compileCode,
+  pollRunSession,
+  sendRunInput,
+  startRunSession,
+  stopRunSession,
+  traceCode
+} from '$lib/api';
 import {
   currentStepIndex,
   errorMessage,
@@ -7,15 +14,13 @@ import {
   lastBinaryPath,
   lastCompileResult,
   lastExecutionResult,
+  runSessionId,
   traceSteps
 } from '$lib/stores';
 import { validateCompileRequest, validateTraceRequest } from '$lib/validation';
 
 interface CompileRunActionParams {
   code: string;
-  runtimeInput: string;
-  scannedInput: string;
-  hasScannedInput: boolean;
 }
 
 interface TraceActionParams {
@@ -31,12 +36,25 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
+function getInitialTraceStepIndex(steps: Array<{ stackFrames?: unknown[] }>): number {
+  const index = steps.findIndex((step) => Array.isArray(step.stackFrames) && step.stackFrames.length > 0);
+  return index >= 0 ? index : 0;
+}
+
+const RUN_POLL_INTERVAL_MS = 120;
+let activeRunSessionId: string | null = null;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 export async function runCompileAndRunAction({
-  code,
-  runtimeInput,
-  scannedInput,
-  hasScannedInput
+  code
 }: CompileRunActionParams): Promise<void> {
+  let startedSessionId: string | null = null;
+
   try {
     const validationError = validateCompileRequest(code);
     if (validationError) {
@@ -48,6 +66,7 @@ export async function runCompileAndRunAction({
     errorMessage.set(null);
     lastExecutionResult.set(null);
     lastBinaryPath.set(null);
+    runSessionId.set(null);
 
     isCompiling.set(true);
     const compileResult = await compileCode({ code });
@@ -65,25 +84,73 @@ export async function runCompileAndRunAction({
     }
 
     lastBinaryPath.set(compileResult.binary);
-    const stdin = hasScannedInput ? scannedInput : runtimeInput;
-    const executionResult = await runBinary({
+    const runStart = await startRunSession({
       binaryPath: compileResult.binary,
-      args: [],
-      input: stdin
+      args: []
     });
-    lastExecutionResult.set(executionResult);
+    if (!runStart.sessionId) {
+      throw new Error('Run session failed to start');
+    }
 
-    if (executionResult.exitCode !== 0 && executionResult.stderr) {
-      errorMessage.set(executionResult.stderr);
+    startedSessionId = runStart.sessionId;
+    activeRunSessionId = runStart.sessionId;
+    runSessionId.set(runStart.sessionId);
+    lastExecutionResult.set({
+      stdout: '',
+      stderr: '',
+      exitCode: 0,
+      executionTime: 0
+    });
+
+    while (activeRunSessionId === startedSessionId) {
+      const poll = await pollRunSession(startedSessionId);
+      lastExecutionResult.set({
+        stdout: poll.stdout,
+        stderr: poll.stderr,
+        exitCode: poll.done ? (poll.exitCode ?? 1) : 0,
+        executionTime: poll.executionTime
+      });
+
+      if (poll.done) {
+        activeRunSessionId = null;
+        runSessionId.set(null);
+        if ((poll.exitCode ?? 1) !== 0 && poll.stderr) {
+          errorMessage.set(poll.stderr);
+        }
+        break;
+      }
+
+      await delay(RUN_POLL_INTERVAL_MS);
     }
   } catch (err) {
     const message = getErrorMessage(err, 'An error occurred');
     errorMessage.set(message);
     console.error('Compile/Run error:', err);
+
+    if (startedSessionId) {
+      await stopRunSession(startedSessionId).catch(() => {});
+      if (activeRunSessionId === startedSessionId) {
+        activeRunSessionId = null;
+      }
+      runSessionId.set(null);
+    }
   } finally {
     isRunning.set(false);
     isCompiling.set(false);
   }
+}
+
+export async function sendRuntimeInputLine(line: string): Promise<void> {
+  const sessionId = activeRunSessionId;
+  if (!sessionId) {
+    throw new Error('No active run session');
+  }
+
+  const payload = line.endsWith('\n') ? line : `${line}\n`;
+  await sendRunInput({
+    sessionId,
+    input: payload
+  });
 }
 
 export async function runTraceAction({
@@ -108,7 +175,7 @@ export async function runTraceAction({
 
     if (result.success) {
       traceSteps.set(result.steps);
-      currentStepIndex.set(0);
+      currentStepIndex.set(getInitialTraceStepIndex(result.steps));
       return { traceErr: null };
     }
 
