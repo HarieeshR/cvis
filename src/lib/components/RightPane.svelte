@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { AlertTriangle, Cpu, Loader2, Code2 } from 'lucide-svelte';
   import Visualizer from './Visualizer.svelte';
-  import type { TraceStep } from '$lib/types';
+  import type { AnalyzeIntentResult, TraceStep } from '$lib/types';
+  import { analyzeProgramIntent } from '$lib/api';
   import {
     editorCode,
     errorMessage,
@@ -12,6 +13,7 @@
     runSessionId
   } from '$lib/stores';
   import { predictProgramIntent } from '$lib/visualizer/program-intent';
+  import { analyzeCodeType } from '$lib/analysis/code-type-finder';
   import { sendRuntimeInputLine } from '$lib/layout/run-actions';
   import { consumeBufferedLines, normalizeTerminalText } from '$lib/terminal/console-input';
   import { RIGHT_PANE_TABS, type RightPaneTabId, VISUALIZER_FEATURES } from './right-pane-config';
@@ -32,9 +34,18 @@
   let prevSessionId: string | null = null;
   let loadingStepIndex = 0;
   let loadingTicker: number | null = null;
+  let analysisDebounce: number | null = null;
+  let remoteIntent: AnalyzeIntentResult | null = null;
+  let analysisRequestId = 0;
 
   $: canSendToStdin = Boolean($runSessionId);
   $: intentPrediction = predictProgramIntent($editorCode);
+  $: analysisReport = analyzeCodeType($editorCode);
+  $: resolvedIntentLabel = remoteIntent?.primaryLabel ?? analysisReport.primaryLabel;
+  $: resolvedIntentConfidence = remoteIntent?.confidence ?? analysisReport.confidence;
+  $: resolvedIntentSignals = remoteIntent?.matchedSignals.length
+    ? remoteIntent.matchedSignals
+    : analysisReport.candidates.slice(0, 3).map((candidate) => candidate.label);
   $: loadingSteps = getLoadingSteps(intentPrediction.primaryLabel);
   // Runtime transcript takes priority so users always see the latest terminal state.
   $: output = $runConsoleTranscript
@@ -84,9 +95,41 @@
     }
   }
 
+  $: {
+    if (typeof window !== 'undefined') {
+      if (analysisDebounce !== null) {
+        clearTimeout(analysisDebounce);
+        analysisDebounce = null;
+      }
+
+      const code = $editorCode.trim();
+      if (!code) {
+        remoteIntent = null;
+      } else {
+        analysisDebounce = window.setTimeout(() => {
+          const requestId = ++analysisRequestId;
+          analyzeProgramIntent({ code })
+            .then((result) => {
+              if (requestId === analysisRequestId) {
+                remoteIntent = result.success ? result : null;
+              }
+            })
+            .catch(() => {
+              if (requestId === analysisRequestId) {
+                remoteIntent = null;
+              }
+            });
+        }, 260);
+      }
+    }
+  }
+
   onMount(() => () => {
     if (loadingTicker !== null) {
       clearInterval(loadingTicker);
+    }
+    if (analysisDebounce !== null) {
+      clearTimeout(analysisDebounce);
     }
   });
 
@@ -182,6 +225,12 @@
         flushPromise = flushInputQueue();
       }
     }
+  }
+
+  function difficultyClass(difficulty: string): string {
+    if (difficulty === 'Hard') return 'difficulty-hard';
+    if (difficulty === 'Medium') return 'difficulty-medium';
+    return 'difficulty-easy';
   }
 </script>
 
@@ -285,10 +334,96 @@
 
     {#if activeTab === 'analysis'}
       <div class="analysis-panel">
-        <div class="coming-soon">
-          <Code2 size={32} class="coming-soon-icon" />
-          <span class="coming-soon-title">Code Analysis</span>
-          <span class="coming-soon-text">Advanced analysis features coming soon...</span>
+        <div class="analysis-scroll">
+          <section class="analysis-card">
+            <div class="analysis-header">
+              <span class="analysis-title">Program Type</span>
+              <span class="analysis-confidence">{Math.round(resolvedIntentConfidence * 100)}%</span>
+            </div>
+            <div class="analysis-primary">{resolvedIntentLabel}</div>
+            <div class="analysis-subtitle">
+              {#if remoteIntent}
+                server-assisted intent via <span class="analysis-engine">{remoteIntent.engine}</span>; section breakdown stays local for responsiveness.
+              {:else}
+                local heuristic inference only; server analyzer is unavailable or still resolving.
+              {/if}
+            </div>
+            <div class="analysis-signal-row">
+              {#each resolvedIntentSignals.slice(0, 4) as signal}
+                <span class="analysis-signal">{signal}</span>
+              {/each}
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="analysis-header">
+              <span class="analysis-title">Intent Signals</span>
+              <span class="analysis-meta">{analysisReport.intentBands.length} active</span>
+            </div>
+            <div class="intent-bars">
+              {#each analysisReport.intentBands as band, idx}
+                <div class="intent-row" style="--delay: {idx * 80}ms;">
+                  <span class="intent-label">{band.label}</span>
+                  <div class="intent-track">
+                    <span class="intent-fill" style="width: {Math.round(band.normalized * 100)}%;"></span>
+                  </div>
+                  <span class="intent-score">{Math.round(band.normalized * 100)}%</span>
+                </div>
+              {/each}
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="analysis-header">
+              <span class="analysis-title">Code Sections</span>
+              <span class="analysis-meta">{analysisReport.sections.length} blocks</span>
+            </div>
+            <div class="section-list">
+              {#each analysisReport.sections as section}
+                <article class="section-item">
+                  <div class="section-top">
+                    <span class="section-name">{section.title}</span>
+                    <span class="section-range">L{section.startLine}-{section.endLine}</span>
+                  </div>
+                  <div class="section-mid">
+                    <span class="section-intent">{section.label}</span>
+                    <span class="section-confidence">{Math.round(section.confidence * 100)}%</span>
+                  </div>
+                  <div class="section-complexity">
+                    <span>time: {section.estimatedTimeComplexity}</span>
+                    <span>space: {section.estimatedSpaceComplexity}</span>
+                  </div>
+                  {#if section.notes.length > 0}
+                    <div class="section-note">{section.notes[0]}</div>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          </section>
+
+          <section class="analysis-card">
+            <div class="analysis-header">
+              <span class="analysis-title">Practice Path (LeetCode-style)</span>
+              <span class="analysis-meta">{analysisReport.recommendations.length} suggestions</span>
+            </div>
+            <div class="recommendation-list">
+              {#each analysisReport.recommendations as rec}
+                <article class="recommendation-item">
+                  <div class="recommendation-top">
+                    <a href={rec.url} target="_blank" rel="noreferrer" class="recommendation-link">{rec.title}</a>
+                    <span class="difficulty-pill {difficultyClass(rec.difficulty)}">{rec.difficulty}</span>
+                  </div>
+                  <div class="recommendation-category">{rec.category}</div>
+                  <div class="recommendation-reason">{rec.reason}</div>
+                  <div class="milestone-list">
+                    {#each rec.milestones.slice(0, 3) as step, i}
+                      <div class="milestone-item">{i + 1}. {step}</div>
+                    {/each}
+                  </div>
+                </article>
+              {/each}
+            </div>
+          </section>
         </div>
       </div>
     {/if}
@@ -679,34 +814,240 @@
   /* Analysis Panel */
   .analysis-panel {
     height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
+    overflow: hidden;
   }
 
-  .coming-soon {
+  .analysis-scroll {
+    height: 100%;
+    overflow-y: auto;
+    padding: 14px;
     display: flex;
     flex-direction: column;
+    gap: 10px;
+  }
+
+  .analysis-card {
+    border: 1px solid var(--od-border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--od-bg-deep) 70%, transparent);
+    padding: 10px 12px;
+  }
+
+  .analysis-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .analysis-title {
+    color: var(--od-text-bright);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.25px;
+    text-transform: uppercase;
+  }
+
+  .analysis-meta,
+  .analysis-confidence {
+    color: var(--od-text-dim);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .analysis-primary {
+    color: var(--od-cyan);
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .analysis-subtitle {
+    color: var(--od-text-dim);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .analysis-engine {
+    color: var(--od-cyan);
+    font-weight: 700;
+  }
+
+  .analysis-signal-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .analysis-signal {
+    font-size: 10px;
+    color: var(--od-blue);
+    border: 1px solid color-mix(in srgb, var(--od-blue) 30%, transparent);
+    background: color-mix(in srgb, var(--od-blue) 10%, transparent);
+    border-radius: 999px;
+    padding: 2px 7px;
+  }
+
+  .intent-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .intent-row {
+    display: grid;
+    grid-template-columns: 88px 1fr 40px;
     align-items: center;
     gap: 8px;
-    color: var(--od-text-dim);
+    animation: rise-in 0.28s ease both;
+    animation-delay: var(--delay, 0ms);
   }
 
-  .coming-soon :global(.coming-soon-icon) {
-    color: var(--od-purple);
-    opacity: 0.5;
-    margin-bottom: 4px;
-  }
-
-  .coming-soon-title {
-    font-size: 15px;
-    font-weight: 700;
+  .intent-label {
+    font-size: 10px;
     color: var(--od-text);
   }
 
-  .coming-soon-text {
-    font-size: 12px;
+  .intent-track {
+    background: color-mix(in srgb, var(--od-border) 75%, transparent);
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .intent-fill {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--od-blue), var(--od-cyan));
+    border-radius: inherit;
+    animation: shimmer 1.8s linear infinite;
+  }
+
+  .intent-score {
+    font-size: 10px;
     color: var(--od-text-dim);
+    text-align: right;
+  }
+
+  .section-list,
+  .recommendation-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .section-item,
+  .recommendation-item {
+    border: 1px solid color-mix(in srgb, var(--od-border) 75%, transparent);
+    background: color-mix(in srgb, var(--od-bg-main) 78%, transparent);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+
+  .section-top,
+  .section-mid,
+  .recommendation-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .section-name,
+  .recommendation-link {
+    color: var(--od-text-bright);
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .recommendation-link:hover {
+    color: var(--od-blue);
+  }
+
+  .section-range,
+  .section-confidence,
+  .recommendation-category {
+    color: var(--od-text-dim);
+    font-size: 10px;
+  }
+
+  .section-intent {
+    color: var(--od-cyan);
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .section-complexity {
+    margin-top: 4px;
+    display: flex;
+    gap: 10px;
+    font-size: 10px;
+    color: var(--od-text-dim);
+  }
+
+  .section-note,
+  .recommendation-reason {
+    margin-top: 6px;
+    color: var(--od-text);
+    font-size: 10px;
+    line-height: 1.5;
+  }
+
+  .difficulty-pill {
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .difficulty-easy {
+    color: var(--od-green);
+    background: color-mix(in srgb, var(--od-green) 12%, transparent);
+    border-color: color-mix(in srgb, var(--od-green) 35%, transparent);
+  }
+
+  .difficulty-medium {
+    color: var(--od-orange);
+    background: color-mix(in srgb, var(--od-orange) 12%, transparent);
+    border-color: color-mix(in srgb, var(--od-orange) 35%, transparent);
+  }
+
+  .difficulty-hard {
+    color: var(--od-red);
+    background: color-mix(in srgb, var(--od-red) 12%, transparent);
+    border-color: color-mix(in srgb, var(--od-red) 35%, transparent);
+  }
+
+  .milestone-list {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .milestone-item {
+    color: var(--od-text-dim);
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes shimmer {
+    0% { filter: brightness(0.95); }
+    50% { filter: brightness(1.1); }
+    100% { filter: brightness(0.95); }
   }
 </style>

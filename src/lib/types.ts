@@ -93,6 +93,20 @@ export interface TraceResult {
   errors: string[];
 }
 
+// ===== INTENT ANALYSIS =====
+export interface AnalyzeIntentRequest {
+  code: string;
+}
+
+export interface AnalyzeIntentResult {
+  success: boolean;
+  engine: string;
+  primaryIntent: string;
+  primaryLabel: string;
+  confidence: number;
+  matchedSignals: string[];
+}
+
 // ===== CODE ANALYSIS =====
 export type TokenType = 
   | 'preprocessor'  // #include, #define, etc.
