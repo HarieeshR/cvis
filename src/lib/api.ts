@@ -3,6 +3,7 @@ import type {
   CompileResult,
   ExecutionRequest,
   ExecutionResult,
+  RunSessionEofResult,
   RunSessionInputRequest,
   RunSessionInputResult,
   RunSessionPollResult,
@@ -113,4 +114,20 @@ export async function stopRunSession(sessionId: string): Promise<void> {
     const message = body?.error || res.statusText || 'Failed to stop run session';
     throw new Error(`Run session stop failed: ${message}`);
   }
+}
+
+export async function closeRunInput(sessionId: string): Promise<RunSessionEofResult> {
+  const res = await fetch(`${API_BASE}/api/run/eof`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId })
+  });
+
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.success) {
+    const message = body?.error || res.statusText || 'Failed to close run input';
+    throw new Error(`Run session eof failed: ${message}`);
+  }
+
+  return body;
 }

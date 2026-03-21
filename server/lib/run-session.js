@@ -7,8 +7,33 @@ import { EXECUTION_LIMITS, REQUEST_LIMITS } from '../config/constants.js';
 
 const TMP_DIR = path.resolve(os.tmpdir());
 const SAFE_BINARY_NAME = /^code_[A-Za-z0-9_-]+\.out$/;
+const STDBUF_BINARIES = ['/usr/bin/stdbuf', '/bin/stdbuf'];
+const STDBUF_PATH = STDBUF_BINARIES.find((candidate) => fs.pathExistsSync(candidate)) ?? null;
+const SCRIPT_BINARIES = ['/usr/bin/script', '/bin/script'];
+const SCRIPT_PATH = SCRIPT_BINARIES.find((candidate) => fs.pathExistsSync(candidate)) ?? null;
 
 const sessions = new Map();
+
+function shellQuote(arg) {
+  const escaped = String(arg).replace(/'/g, "'\"'\"'");
+  return `'${escaped}'`;
+}
+
+function spawnRunProcess(binaryPath, normalizedArgs) {
+  if (SCRIPT_PATH) {
+    const command = [binaryPath, ...normalizedArgs].map(shellQuote).join(' ');
+    const child = spawn(SCRIPT_PATH, ['-qfec', command, '/dev/null'], { stdio: 'pipe' });
+    return { child, usesPty: true };
+  }
+
+  if (STDBUF_PATH) {
+    const child = spawn(STDBUF_PATH, ['-o0', '-e0', binaryPath, ...normalizedArgs], { stdio: 'pipe' });
+    return { child, usesPty: false };
+  }
+
+  const child = spawn(binaryPath, normalizedArgs, { stdio: 'pipe' });
+  return { child, usesPty: false };
+}
 
 function isSafeBinaryPath(binaryPath) {
   if (typeof binaryPath !== 'string' || !binaryPath.trim()) {
@@ -108,12 +133,13 @@ export async function startRunSession(binaryPath, args = []) {
 
   const sessionId = crypto.randomUUID();
   const normalizedArgs = normalizeArgs(args);
-  const child = spawn(safeBinaryPath, normalizedArgs, { stdio: 'pipe' });
+  const { child, usesPty } = spawnRunProcess(safeBinaryPath, normalizedArgs);
 
   const session = {
     sessionId,
     binaryPath: safeBinaryPath,
     child,
+    output: '',
     stdout: '',
     stderr: '',
     outputBytes: 0,
@@ -123,18 +149,32 @@ export async function startRunSession(binaryPath, args = []) {
     startTime: Date.now(),
     timedOut: false,
     outputLimitHit: false,
-    cleanupTimer: null
+    inputClosed: false,
+    usesPty,
+    cleanupTimer: null,
+    timeoutTimer: null,
+    refreshTimeout: null
   };
 
-  const timeoutTimer = setTimeout(() => {
-    session.timedOut = true;
-    child.kill('SIGKILL');
-  }, EXECUTION_LIMITS.timeoutMs);
+  const refreshTimeout = () => {
+    if (session.timeoutTimer) {
+      clearTimeout(session.timeoutTimer);
+    }
+    session.timeoutTimer = setTimeout(() => {
+      session.timedOut = true;
+      child.kill('SIGKILL');
+    }, EXECUTION_LIMITS.timeoutMs);
+    session.timeoutTimer.unref?.();
+  };
+  session.refreshTimeout = refreshTimeout;
+  refreshTimeout();
 
   child.stdout.on('data', (chunk) => {
-    const text = chunk.toString();
+    const text = chunk.toString().replace(/\r\n/g, '\n');
     session.outputBytes += chunk.length;
+    session.output += text;
     session.stdout += text;
+    refreshTimeout();
 
     if (!session.outputLimitHit && session.outputBytes > EXECUTION_LIMITS.outputBytes) {
       session.outputLimitHit = true;
@@ -143,9 +183,11 @@ export async function startRunSession(binaryPath, args = []) {
   });
 
   child.stderr.on('data', (chunk) => {
-    const text = chunk.toString();
+    const text = chunk.toString().replace(/\r\n/g, '\n');
     session.outputBytes += chunk.length;
+    session.output += text;
     session.stderr += text;
+    refreshTimeout();
 
     if (!session.outputLimitHit && session.outputBytes > EXECUTION_LIMITS.outputBytes) {
       session.outputLimitHit = true;
@@ -158,7 +200,10 @@ export async function startRunSession(binaryPath, args = []) {
     session.executionTime = Date.now() - session.startTime;
     session.exitCode = 1;
     session.stderr = `${session.stderr}${session.stderr ? '\n' : ''}${err.message}`;
-    clearTimeout(timeoutTimer);
+    if (session.timeoutTimer) {
+      clearTimeout(session.timeoutTimer);
+      session.timeoutTimer = null;
+    }
     void finalizeSession(session).catch(() => {});
     scheduleSessionCleanup(sessionId);
   });
@@ -176,7 +221,10 @@ export async function startRunSession(binaryPath, args = []) {
       session.stderr = `Execution output exceeded ${EXECUTION_LIMITS.outputBytes} bytes`;
     }
 
-    clearTimeout(timeoutTimer);
+    if (session.timeoutTimer) {
+      clearTimeout(session.timeoutTimer);
+      session.timeoutTimer = null;
+    }
     await finalizeSession(session).catch(() => {});
     scheduleSessionCleanup(sessionId);
   });
@@ -198,6 +246,7 @@ export function pollRunSession(sessionId) {
   return {
     found: true,
     sessionId,
+    output: session.output,
     stdout: session.stdout,
     stderr: session.stderr,
     done: session.done,
@@ -220,6 +269,10 @@ export function sendRunInput(sessionId, input) {
     return { success: false, error: 'Input must be a string' };
   }
 
+  if (session.inputClosed) {
+    return { success: false, error: 'stdin is already closed for this run session' };
+  }
+
   if (Buffer.byteLength(input, 'utf8') > REQUEST_LIMITS.runInputBytes) {
     return {
       success: false,
@@ -227,8 +280,47 @@ export function sendRunInput(sessionId, input) {
     };
   }
 
-  session.child.stdin.write(input);
+  try {
+    session.child.stdin.write(input);
+    if (!session.usesPty) {
+      session.output += input;
+    }
+    session.refreshTimeout?.();
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to write to program stdin'
+    };
+  }
   return { success: true };
+}
+
+export function closeRunInput(sessionId) {
+  const session = sessions.get(sessionId);
+  if (!session) {
+    return { success: false, error: 'Run session not found' };
+  }
+
+  if (session.done) {
+    return { success: false, error: 'Run session has already completed' };
+  }
+
+  if (session.inputClosed) {
+    return { success: true };
+  }
+
+  try {
+    session.child.stdin.end();
+    session.inputClosed = true;
+    session.output += '^D\n';
+    session.refreshTimeout?.();
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to close program stdin'
+    };
+  }
 }
 
 export function stopRunSession(sessionId) {

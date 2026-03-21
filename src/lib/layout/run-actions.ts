@@ -1,4 +1,5 @@
 import {
+  closeRunInput,
   compileCode,
   pollRunSession,
   sendRunInput,
@@ -14,6 +15,7 @@ import {
   lastBinaryPath,
   lastCompileResult,
   lastExecutionResult,
+  runConsoleTranscript,
   runSessionId,
   traceSteps
 } from '$lib/stores';
@@ -43,6 +45,8 @@ function getInitialTraceStepIndex(steps: Array<{ stackFrames?: unknown[] }>): nu
 
 const RUN_POLL_INTERVAL_MS = 120;
 let activeRunSessionId: string | null = null;
+let activeRunOutputCursor = '';
+let activeRunInputClosed = false;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -62,11 +66,20 @@ export async function runCompileAndRunAction({
       return;
     }
 
+    if (activeRunSessionId) {
+      await stopRunSession(activeRunSessionId).catch(() => {});
+      activeRunSessionId = null;
+      runSessionId.set(null);
+    }
+
     isRunning.set(true);
     errorMessage.set(null);
     lastExecutionResult.set(null);
     lastBinaryPath.set(null);
     runSessionId.set(null);
+    runConsoleTranscript.set('');
+    activeRunOutputCursor = '';
+    activeRunInputClosed = false;
 
     isCompiling.set(true);
     const compileResult = await compileCode({ code });
@@ -94,6 +107,8 @@ export async function runCompileAndRunAction({
 
     startedSessionId = runStart.sessionId;
     activeRunSessionId = runStart.sessionId;
+    activeRunOutputCursor = '';
+    activeRunInputClosed = false;
     runSessionId.set(runStart.sessionId);
     lastExecutionResult.set({
       stdout: '',
@@ -104,6 +119,18 @@ export async function runCompileAndRunAction({
 
     while (activeRunSessionId === startedSessionId) {
       const poll = await pollRunSession(startedSessionId);
+      const mergedOutput = poll.output ?? `${poll.stdout}${poll.stderr}`;
+
+      if (mergedOutput.startsWith(activeRunOutputCursor)) {
+        const delta = mergedOutput.slice(activeRunOutputCursor.length);
+        if (delta) {
+          runConsoleTranscript.update((prev) => `${prev}${delta}`);
+        }
+      } else if (mergedOutput !== activeRunOutputCursor) {
+        runConsoleTranscript.set(mergedOutput);
+      }
+      activeRunOutputCursor = mergedOutput;
+
       lastExecutionResult.set({
         stdout: poll.stdout,
         stderr: poll.stderr,
@@ -113,6 +140,8 @@ export async function runCompileAndRunAction({
 
       if (poll.done) {
         activeRunSessionId = null;
+        activeRunInputClosed = false;
+        activeRunOutputCursor = '';
         runSessionId.set(null);
         if ((poll.exitCode ?? 1) !== 0 && poll.stderr) {
           errorMessage.set(poll.stderr);
@@ -132,6 +161,8 @@ export async function runCompileAndRunAction({
       if (activeRunSessionId === startedSessionId) {
         activeRunSessionId = null;
       }
+      activeRunInputClosed = false;
+      activeRunOutputCursor = '';
       runSessionId.set(null);
     }
   } finally {
@@ -146,11 +177,44 @@ export async function sendRuntimeInputLine(line: string): Promise<void> {
     throw new Error('No active run session');
   }
 
+  if (activeRunInputClosed) {
+    throw new Error('Program stdin is closed (EOF already sent)');
+  }
+
   const payload = line.endsWith('\n') ? line : `${line}\n`;
   await sendRunInput({
     sessionId,
     input: payload
   });
+}
+
+export async function sendRuntimeEof(): Promise<void> {
+  const sessionId = activeRunSessionId;
+  if (!sessionId) {
+    throw new Error('No active run session');
+  }
+
+  if (activeRunInputClosed) {
+    return;
+  }
+
+  await closeRunInput(sessionId);
+  activeRunInputClosed = true;
+}
+
+export async function interruptRuntimeSession(): Promise<void> {
+  const sessionId = activeRunSessionId;
+  if (!sessionId) {
+    return;
+  }
+
+  activeRunSessionId = null;
+  activeRunInputClosed = false;
+  activeRunOutputCursor = '';
+  runSessionId.set(null);
+  runConsoleTranscript.update((prev) => `${prev}^C\n`);
+
+  await stopRunSession(sessionId).catch(() => {});
 }
 
 export async function runTraceAction({

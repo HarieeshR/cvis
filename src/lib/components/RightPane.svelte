@@ -3,11 +3,14 @@
   import Visualizer from './Visualizer.svelte';
   import type { TraceStep } from '$lib/types';
   import {
-    isRunning,
+    errorMessage,
     lastCompileResult,
-    lastExecutionResult
+    lastExecutionResult,
+    runConsoleTranscript,
+    runSessionId
   } from '$lib/stores';
   import { sendRuntimeInputLine } from '$lib/layout/run-actions';
+  import { consumeBufferedLines, normalizeTerminalText } from '$lib/terminal/console-input';
   import { RIGHT_PANE_TABS, type RightPaneTabId, VISUALIZER_FEATURES } from './right-pane-config';
 
   export let traceSteps: TraceStep[] = [];
@@ -16,21 +19,38 @@
   export let traceErr: string | null = null;
 
   let activeTab: RightPaneTabId = 'output';
-  let terminalInput = '';
+  let terminalInputBuffer = '';
   let terminalSending = false;
+  let pendingInputLines: string[] = [];
+  let flushPromise: Promise<void> | null = null;
   let outputRef: HTMLDivElement;
-  let prevOutput = '';
+  let prevRenderedOutput = '';
+  let prevSessionId: string | null = null;
 
-  $: output = $lastExecutionResult
-    ? $lastExecutionResult.stdout + $lastExecutionResult.stderr
+  $: canSendToStdin = Boolean($runSessionId);
+  $: output = $runConsoleTranscript
+    ? $runConsoleTranscript
+    : $lastExecutionResult
+      ? $lastExecutionResult.stdout + $lastExecutionResult.stderr
     : $lastCompileResult
       ? $lastCompileResult.output || $lastCompileResult.errors.join('\n')
       : '';
+  $: renderedOutput = `${output}${canSendToStdin ? terminalInputBuffer : ''}`;
 
   $: hasError = $lastExecutionResult?.stderr || $lastCompileResult?.errors?.length;
   $: currentTraceStepData = traceSteps[currentStep] || null;
-  $: if (outputRef && output !== prevOutput) {
-    prevOutput = output;
+  $: if ($runSessionId !== prevSessionId) {
+    prevSessionId = $runSessionId;
+    terminalInputBuffer = '';
+    pendingInputLines = [];
+    terminalSending = false;
+    flushPromise = null;
+  }
+  $: if (canSendToStdin && outputRef) {
+    queueMicrotask(() => outputRef?.focus());
+  }
+  $: if (outputRef && renderedOutput !== prevRenderedOutput) {
+    prevRenderedOutput = renderedOutput;
     queueMicrotask(() => {
       if (outputRef) {
         outputRef.scrollTop = outputRef.scrollHeight;
@@ -38,17 +58,88 @@
     });
   }
 
-  async function handleTerminalSubmit() {
-    if (!$isRunning || terminalSending) return;
+  function enqueueInputLine(line: string) {
+    pendingInputLines = [...pendingInputLines, line];
+    if (!flushPromise) {
+      flushPromise = flushInputQueue();
+    }
+  }
+
+  async function flushInputQueue() {
+    if (terminalSending) {
+      return;
+    }
 
     terminalSending = true;
     try {
-      await sendRuntimeInputLine(terminalInput);
-      terminalInput = '';
+      while (canSendToStdin && pendingInputLines.length > 0) {
+        const [nextLine, ...rest] = pendingInputLines;
+        pendingInputLines = rest;
+        await sendRuntimeInputLine(nextLine);
+      }
     } catch (err) {
-      console.error('Failed to send runtime input:', err);
+      const message = err instanceof Error ? err.message : 'Failed to send runtime input';
+      errorMessage.set(message);
+      console.error(message);
+      pendingInputLines = [];
     } finally {
       terminalSending = false;
+      flushPromise = null;
+      queueMicrotask(() => outputRef?.focus());
+    }
+  }
+
+  function handleTerminalKeydown(event: KeyboardEvent) {
+    if (!canSendToStdin) {
+      return;
+    }
+
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const line = terminalInputBuffer;
+      terminalInputBuffer = '';
+      enqueueInputLine(line);
+      return;
+    }
+
+    if (event.key === 'Backspace') {
+      event.preventDefault();
+      if (terminalInputBuffer.length > 0) {
+        terminalInputBuffer = terminalInputBuffer.slice(0, -1);
+      }
+      return;
+    }
+
+    if (event.key.length === 1) {
+      event.preventDefault();
+      terminalInputBuffer += event.key;
+    }
+  }
+
+  function handleTerminalPaste(event: ClipboardEvent) {
+    if (!canSendToStdin) {
+      return;
+    }
+
+    const text = event.clipboardData?.getData('text') ?? '';
+    if (!text) return;
+
+    event.preventDefault();
+
+    const normalized = normalizeTerminalText(text);
+    const combined = `${terminalInputBuffer}${normalized}`;
+    const { lines, remainder } = consumeBufferedLines(combined);
+
+    terminalInputBuffer = remainder;
+    if (lines.length > 0) {
+      pendingInputLines = [...pendingInputLines, ...lines];
+      if (!flushPromise) {
+        flushPromise = flushInputQueue();
+      }
     }
   }
 </script>
@@ -75,9 +166,21 @@
   <div class="content-area">
     {#if activeTab === 'output'}
       <div class="output-panel terminal-panel">
-        <div bind:this={outputRef} class="output-content terminal-output">
+        <div
+          bind:this={outputRef}
+          class="output-content terminal-output"
+          class:terminal-active={canSendToStdin}
+          role="textbox"
+          aria-label="Program output terminal"
+          aria-multiline="true"
+          tabindex="0"
+          on:keydown={handleTerminalKeydown}
+          on:paste={handleTerminalPaste}
+        >
           {#if output}
-            <pre class="output-text" class:error-output={hasError}>{output}</pre>
+            <pre class="output-text" class:error-output={hasError}>{renderedOutput}{#if canSendToStdin}<span class="terminal-caret"></span>{/if}</pre>
+          {:else if canSendToStdin}
+            <pre class="output-text">{terminalInputBuffer}<span class="terminal-caret"></span></pre>
           {:else}
             <div class="empty-output">
               <Code2 size={28} class="empty-icon" />
@@ -86,24 +189,6 @@
             </div>
           {/if}
         </div>
-        <form class="terminal-input-row" on:submit|preventDefault={handleTerminalSubmit}>
-          <span class="terminal-prompt">stdin &gt;</span>
-          <input
-            class="terminal-input"
-            type="text"
-            bind:value={terminalInput}
-            placeholder={$isRunning ? 'Type input and press Enter' : 'Run program to enable stdin'}
-            disabled={!$isRunning || terminalSending}
-            autocomplete="off"
-          />
-          <button
-            type="submit"
-            class="terminal-send"
-            disabled={!$isRunning || terminalSending}
-          >
-            {terminalSending ? '...' : 'Send'}
-          </button>
-        </form>
       </div>
     {/if}
 
@@ -282,62 +367,6 @@
     overflow-y: auto;
   }
 
-  .terminal-input-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: var(--od-bg-deep);
-    border: 1px solid var(--od-border);
-    border-radius: 8px;
-    padding: 8px;
-    flex-shrink: 0;
-  }
-
-  .terminal-prompt {
-    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
-    font-size: 11px;
-    color: var(--od-green);
-    letter-spacing: 0.3px;
-    white-space: nowrap;
-  }
-
-  .terminal-input {
-    flex: 1;
-    min-width: 0;
-    border: none;
-    background: transparent;
-    color: var(--od-text-bright);
-    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
-    font-size: 12px;
-    outline: none;
-  }
-
-  .terminal-input::placeholder {
-    color: var(--od-text-dim);
-  }
-
-  .terminal-send {
-    border: 1px solid var(--od-border);
-    background: var(--od-bg-main);
-    color: var(--od-text);
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 6px 10px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .terminal-send:hover:not(:disabled) {
-    border-color: var(--od-blue);
-    color: var(--od-text-bright);
-  }
-
-  .terminal-send:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   .output-text {
     font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
     font-size: 12px;
@@ -350,6 +379,26 @@
     background: var(--od-bg-deep);
     border-radius: 8px;
     border: 1px solid var(--od-border);
+  }
+
+  .terminal-output.terminal-active {
+    outline: 1px solid color-mix(in srgb, var(--od-green) 35%, var(--od-border));
+    outline-offset: -1px;
+    border-radius: 8px;
+  }
+
+  .terminal-caret {
+    display: inline-block;
+    width: 7px;
+    height: 1.05em;
+    vertical-align: text-bottom;
+    background: var(--od-green);
+    margin-left: 1px;
+    animation: blink 1s steps(2, start) infinite;
+  }
+
+  @keyframes blink {
+    to { visibility: hidden; }
   }
 
   .output-text.error-output {
