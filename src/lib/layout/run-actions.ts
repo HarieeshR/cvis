@@ -11,15 +11,19 @@ import {
   currentStepIndex,
   errorMessage,
   isCompiling,
+  isPlaying,
   isRunning,
   lastBinaryPath,
   lastCompileResult,
   lastExecutionResult,
   runConsoleTranscript,
   runSessionId,
+  selectedLanguage,
   traceSteps
 } from '$lib/stores';
+import { get } from 'svelte/store';
 import { validateCompileRequest, validateTraceRequest } from '$lib/validation';
+import type { LanguageId } from '$lib/languages';
 
 interface CompileRunActionParams {
   code: string;
@@ -38,15 +42,49 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-function getInitialTraceStepIndex(steps: Array<{ stackFrames?: unknown[] }>): number {
-  const index = steps.findIndex((step) => Array.isArray(step.stackFrames) && step.stackFrames.length > 0);
-  return index >= 0 ? index : 0;
+function hasNonGlobalFrame(step: { stackFrames?: Array<{ name?: unknown }> }): boolean {
+  if (!Array.isArray(step.stackFrames)) return false;
+  return step.stackFrames.some((frame) => {
+    if (!frame || typeof frame !== 'object') return false;
+    const name = typeof frame.name === 'string' ? frame.name.trim().toLowerCase() : '';
+    return name !== '' && name !== 'global';
+  });
+}
+
+function getInitialTraceStepIndex(steps: Array<{ stackFrames?: Array<{ name?: unknown }> }>): number {
+  const firstExecutableFrame = steps.findIndex((step) => hasNonGlobalFrame(step));
+  if (firstExecutableFrame >= 0) {
+    return firstExecutableFrame;
+  }
+
+  const firstWithFrames = steps.findIndex(
+    (step) => Array.isArray(step.stackFrames) && step.stackFrames.length > 0
+  );
+  return firstWithFrames >= 0 ? firstWithFrames : 0;
 }
 
 const RUN_POLL_INTERVAL_MS = 120;
 let activeRunSessionId: string | null = null;
 let activeRunOutputCursor = '';
 let activeRunInputClosed = false;
+let lastCompiledSource = '';
+let lastCompiledLanguage: LanguageId = 'c';
+
+function getCurrentLanguage(): LanguageId {
+  return get(selectedLanguage);
+}
+
+function ensureCSupported(actionLabel: 'compile' | 'run' | 'trace'): boolean {
+  const language = getCurrentLanguage();
+  if (language === 'c') {
+    return true;
+  }
+
+  errorMessage.set(
+    `${language.toUpperCase()} ${actionLabel} is not available yet. Switch language to C for now.`
+  );
+  return false;
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -54,12 +92,15 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-export async function runCompileAndRunAction({
+export async function runCompileAction({
   code
 }: CompileRunActionParams): Promise<void> {
-  let startedSessionId: string | null = null;
-
   try {
+    if (!ensureCSupported('compile')) {
+      return;
+    }
+
+    const language = getCurrentLanguage();
     const validationError = validateCompileRequest(code);
     if (validationError) {
       errorMessage.set(validationError);
@@ -72,33 +113,94 @@ export async function runCompileAndRunAction({
       runSessionId.set(null);
     }
 
-    isRunning.set(true);
     errorMessage.set(null);
-    lastExecutionResult.set(null);
-    lastBinaryPath.set(null);
     runSessionId.set(null);
+    lastExecutionResult.set(null);
     runConsoleTranscript.set('');
     activeRunOutputCursor = '';
     activeRunInputClosed = false;
 
     isCompiling.set(true);
-    const compileResult = await compileCode({ code });
+    const compileResult = await compileCode({ code, language });
     lastCompileResult.set(compileResult);
     isCompiling.set(false);
 
     if (!compileResult.success) {
+      lastBinaryPath.set(null);
+      lastCompiledSource = '';
       errorMessage.set(compileResult.errors.join('\n'));
       return;
     }
 
     if (!compileResult.binary) {
+      lastBinaryPath.set(null);
+      lastCompiledSource = '';
       errorMessage.set('Compilation succeeded, but no executable binary was returned.');
       return;
     }
 
     lastBinaryPath.set(compileResult.binary);
+    lastCompiledSource = code;
+    lastCompiledLanguage = language;
+  } catch (err) {
+    const message = getErrorMessage(err, 'An error occurred');
+    errorMessage.set(message);
+    console.error('Compile error:', err);
+  } finally {
+    isCompiling.set(false);
+  }
+}
+
+export async function runRunAction({
+  code
+}: CompileRunActionParams): Promise<void> {
+  let startedSessionId: string | null = null;
+
+  try {
+    if (!ensureCSupported('run')) {
+      return;
+    }
+
+    const language = getCurrentLanguage();
+    const validationError = validateCompileRequest(code);
+    if (validationError) {
+      errorMessage.set(validationError);
+      return;
+    }
+
+    if (activeRunSessionId) {
+      await stopRunSession(activeRunSessionId).catch(() => {});
+      activeRunSessionId = null;
+      runSessionId.set(null);
+    }
+
+    const compileResult = get(lastCompileResult);
+    const binaryPath = get(lastBinaryPath);
+
+    if (!compileResult?.success || !binaryPath) {
+      errorMessage.set('Compile first, then run.');
+      return;
+    }
+
+    if (lastCompiledSource !== code) {
+      errorMessage.set('Code changed after the last compile. Compile again before running.');
+      return;
+    }
+
+    if (lastCompiledLanguage !== language) {
+      errorMessage.set('Language changed after compile. Compile again before running.');
+      return;
+    }
+
+    isRunning.set(true);
+    errorMessage.set(null);
+    runSessionId.set(null);
+    runConsoleTranscript.set('');
+    activeRunOutputCursor = '';
+    activeRunInputClosed = false;
+
     const runStart = await startRunSession({
-      binaryPath: compileResult.binary,
+      binaryPath,
       args: []
     });
     if (!runStart.sessionId) {
@@ -154,7 +256,7 @@ export async function runCompileAndRunAction({
   } catch (err) {
     const message = getErrorMessage(err, 'An error occurred');
     errorMessage.set(message);
-    console.error('Compile/Run error:', err);
+    console.error('Run error:', err);
 
     if (startedSessionId) {
       await stopRunSession(startedSessionId).catch(() => {});
@@ -167,7 +269,16 @@ export async function runCompileAndRunAction({
     }
   } finally {
     isRunning.set(false);
-    isCompiling.set(false);
+  }
+}
+
+export async function runCompileAndRunAction({
+  code
+}: CompileRunActionParams): Promise<void> {
+  await runCompileAction({ code });
+  const compileResult = get(lastCompileResult);
+  if (compileResult?.success) {
+    await runRunAction({ code });
   }
 }
 
@@ -222,6 +333,12 @@ export async function runTraceAction({
   breakpoints = []
 }: TraceActionParams): Promise<TraceActionResult> {
   try {
+    if (!ensureCSupported('trace')) {
+      return { traceErr: `Trace is currently available only for C.` };
+    }
+
+    isPlaying.set(false);
+
     const validationError = validateTraceRequest(code);
     if (validationError) {
       errorMessage.set(validationError);

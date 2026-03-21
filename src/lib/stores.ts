@@ -1,5 +1,6 @@
 import { writable, derived } from 'svelte/store';
 import type { TraceStep, CompileResult, ExecutionResult } from './types';
+import type { LanguageId } from './languages';
 
 // Editor state
 export const editorCode = writable<string>(`#include <stdio.h>
@@ -12,6 +13,7 @@ int main() {
 
 export const cursorLine = writable<number>(1);
 export const cursorColumn = writable<number>(0);
+export const selectedLanguage = writable<LanguageId>('c');
 
 // Visualizer state
 export const traceSteps = writable<TraceStep[]>([]);

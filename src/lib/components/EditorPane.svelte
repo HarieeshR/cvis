@@ -1,18 +1,28 @@
 <script lang="ts">
-  import { ChevronLeft, ChevronRight, Cpu, FileText, Loader2, SkipBack, SkipForward, Play, Pause } from 'lucide-svelte';
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { ChevronLeft, ChevronRight, FileText, Plus, SkipBack, SkipForward, Play, Pause, X } from 'lucide-svelte';
+  import { onMount } from 'svelte';
   import highlight from '$lib/highlight';
-  import { currentStepIndex, editorCode, isPlaying, traceSteps } from '$lib/stores';
+  import { currentStepIndex, editorCode, isPlaying, selectedLanguage, traceSteps } from '$lib/stores';
+  import { getLanguageOption, type LanguageId } from '$lib/languages';
 
   const LINE_HEIGHT_PX = 22;
   const EDITOR_PADDING_PX = 12;
+  const EDITOR_SESSION_STORAGE_KEY = 'cvis-editor-session-v1';
 
-  const dispatch = createEventDispatcher<{
-    trace: void;
-  }>();
+  interface EditorFile {
+    id: string;
+    name: string;
+    content: string;
+  }
+
+  interface PersistedEditorSession {
+    version: 1;
+    language: LanguageId;
+    files: EditorFile[];
+    activeFileId: string;
+  }
 
   let code = $editorCode;
-  let isTracing = false;
   let hlLine: number | null = null;
   let lineCount = 1;
   let taRef: HTMLTextAreaElement;
@@ -20,16 +30,106 @@
   let lnRef: HTMLDivElement;
   let playing = false;
   let scrollTop = 0;
+  let lastAutoScrollStep = -1;
+  let files: EditorFile[] = [];
+  let activeFileId = '';
+  let initializedTabs = false;
+  let syncFromEditorChange = false;
 
-  $: {
-    code = $editorCode;
-    lineCount = code.split('\n').length;
+  function initializeDefaultSession() {
+    if (initializedTabs) {
+      return;
+    }
+
+    const extension = getLanguageOption($selectedLanguage).extension;
+    const starter: EditorFile = {
+      id: 'file-main',
+      name: `main.${extension}`,
+      content: $editorCode
+    };
+    files = [starter];
+    activeFileId = starter.id;
+    code = starter.content;
+    initializedTabs = true;
   }
+
+  function restorePersistedSession() {
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    const raw = localStorage.getItem(EDITOR_SESSION_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<PersistedEditorSession>;
+      if (
+        parsed.version !== 1 ||
+        !Array.isArray(parsed.files) ||
+        parsed.files.length === 0 ||
+        typeof parsed.activeFileId !== 'string' ||
+        typeof parsed.language !== 'string'
+      ) {
+        return;
+      }
+
+      const safeFiles = parsed.files.filter((file): file is EditorFile =>
+        !!file &&
+        typeof file.id === 'string' &&
+        typeof file.name === 'string' &&
+        typeof file.content === 'string'
+      );
+      if (safeFiles.length === 0) {
+        return;
+      }
+
+      const activeId = safeFiles.some((file) => file.id === parsed.activeFileId)
+        ? parsed.activeFileId
+        : safeFiles[0].id;
+
+      files = safeFiles;
+      activeFileId = activeId;
+      initializedTabs = true;
+
+      const language = parsed.language;
+      if (language === 'c' || language === 'java' || language === 'python') {
+        selectedLanguage.set(language);
+      }
+
+      const active = safeFiles.find((file) => file.id === activeId) ?? safeFiles[0];
+      syncFromEditorChange = true;
+      code = active.content;
+      $editorCode = active.content;
+      queueMicrotask(() => {
+        syncFromEditorChange = false;
+      });
+    } catch {
+      // Ignore invalid or stale cache payloads.
+    }
+  }
+
+  function persistSession() {
+    if (!initializedTabs || typeof localStorage === 'undefined') {
+      return;
+    }
+
+    const payload: PersistedEditorSession = {
+      version: 1,
+      language: $selectedLanguage,
+      files,
+      activeFileId
+    };
+    localStorage.setItem(EDITOR_SESSION_STORAGE_KEY, JSON.stringify(payload));
+  }
+
+  $: activeFile = files.find((file) => file.id === activeFileId) ?? null;
+  $: lineCount = code.split('\n').length;
 
   $: total = $traceSteps.length;
   $: curStep = $currentStepIndex;
   $: playing = $isPlaying;
-  $: isTraceMode = total > 0;
   $: currentLineTop = hlLine
     ? (hlLine - 1) * LINE_HEIGHT_PX + EDITOR_PADDING_PX - scrollTop
     : null;
@@ -42,6 +142,34 @@
     }
   }
 
+  $: if (initializedTabs && !syncFromEditorChange && $editorCode !== code) {
+    code = $editorCode;
+    updateActiveFileContent($editorCode);
+  }
+
+  $: if (initializedTabs) {
+    persistSession();
+  }
+
+  $: if (taRef && hlLine && curStep !== lastAutoScrollStep) {
+    const lineTop = (hlLine - 1) * LINE_HEIGHT_PX;
+    const lineBottom = lineTop + LINE_HEIGHT_PX;
+    const viewportTop = taRef.scrollTop;
+    const viewportBottom = viewportTop + taRef.clientHeight;
+    const viewportMargin = LINE_HEIGHT_PX * 2;
+
+    if (lineTop < viewportTop + viewportMargin || lineBottom > viewportBottom - viewportMargin) {
+      const centeredTop = Math.max(
+        0,
+        lineTop - Math.max(0, Math.floor(taRef.clientHeight / 2) - LINE_HEIGHT_PX)
+      );
+      taRef.scrollTop = centeredTop;
+      syncScroll();
+    }
+
+    lastAutoScrollStep = curStep;
+  }
+
   function syncScroll() {
     if (taRef && preRef && lnRef) {
       scrollTop = taRef.scrollTop;
@@ -52,38 +180,104 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (isTraceMode) {
-      return;
-    }
-
     if (e.key === 'Tab') {
       e.preventDefault();
       const start = taRef.selectionStart;
       const end = taRef.selectionEnd;
       code = code.substring(0, start) + '  ' + code.substring(end);
-      $editorCode = code;
+      commitCodeToActiveFile(code);
       setTimeout(() => {
         taRef.selectionStart = taRef.selectionEnd = start + 2;
       }, 0);
     }
   }
 
+  function resetTraceState() {
+    traceSteps.set([]);
+    currentStepIndex.set(0);
+    isPlaying.set(false);
+  }
+
+  function updateActiveFileContent(content: string) {
+    files = files.map((file) =>
+      file.id === activeFileId ? { ...file, content } : file
+    );
+  }
+
+  function commitCodeToActiveFile(content: string) {
+    syncFromEditorChange = true;
+    code = content;
+    updateActiveFileContent(content);
+    $editorCode = content;
+    queueMicrotask(() => {
+      syncFromEditorChange = false;
+    });
+  }
+
   function handleCodeChange() {
-    if (isTraceMode) {
-      code = $editorCode;
+    commitCodeToActiveFile(code);
+    resetTraceState();
+  }
+
+  function switchFile(fileId: string) {
+    if (fileId === activeFileId) {
       return;
     }
 
-    $editorCode = code;
-    traceSteps.set([]);
+    const target = files.find((file) => file.id === fileId);
+    if (!target) {
+      return;
+    }
+
+    activeFileId = fileId;
+    commitCodeToActiveFile(target.content);
+    resetTraceState();
   }
 
-  async function runTrace() {
-    isTracing = true;
-    dispatch('trace');
-    setTimeout(() => {
-      isTracing = false;
-    }, 500);
+  function createNewFile() {
+    const extension = getLanguageOption($selectedLanguage).extension;
+    let index = files.length + 1;
+    let candidate = `file${index}.${extension}`;
+    while (files.some((file) => file.name === candidate)) {
+      index += 1;
+      candidate = `file${index}.${extension}`;
+    }
+
+    const newFile: EditorFile = {
+      id: `file-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: candidate,
+      content: ''
+    };
+
+    files = [...files, newFile];
+    activeFileId = newFile.id;
+    commitCodeToActiveFile(newFile.content);
+    resetTraceState();
+    queueMicrotask(() => taRef?.focus());
+  }
+
+  function closeFile(fileId: string, event: MouseEvent) {
+    event.stopPropagation();
+    if (files.length <= 1) {
+      return;
+    }
+
+    const index = files.findIndex((file) => file.id === fileId);
+    if (index < 0) {
+      return;
+    }
+
+    const wasActive = fileId === activeFileId;
+    const remaining = files.filter((file) => file.id !== fileId);
+    files = remaining;
+
+    if (wasActive) {
+      const fallback = remaining[Math.max(0, index - 1)] ?? remaining[0];
+      activeFileId = fallback.id;
+      commitCodeToActiveFile(fallback.content);
+    }
+
+    resetTraceState();
   }
 
   function setCurStep(val: number | ((prev: number) => number)) {
@@ -120,19 +314,53 @@
     }
   }
 
-  onMount(() => () => {
-    if (playInterval) clearInterval(playInterval);
+  onMount(() => {
+    restorePersistedSession();
+    initializeDefaultSession();
+
+    return () => {
+      if (playInterval) clearInterval(playInterval);
+    };
   });
 </script>
 
 <div class="editor-pane">
   <!-- File Tab -->
   <div class="file-tab">
-    <div class="tab-item active">
-      <FileText size={14} />
-      <span class="tab-name">main.c</span>
-      <span class="tab-dot"></span>
-    </div>
+    {#each files as file (file.id)}
+      <div class="tab-shell" class:active={file.id === activeFileId}>
+        <button
+          type="button"
+          class="tab-item"
+          on:click={() => switchFile(file.id)}
+        >
+          <FileText size={13} />
+          <span class="tab-name">{file.name}</span>
+        </button>
+        {#if files.length > 1}
+          <button
+            type="button"
+            class="tab-close"
+            aria-label={`Close ${file.name}`}
+            on:click={(e) => closeFile(file.id, e)}
+          >
+            <X size={12} />
+          </button>
+        {:else}
+          <span class="tab-dot"></span>
+        {/if}
+      </div>
+    {/each}
+
+    <button
+      type="button"
+      class="new-file-btn"
+      aria-label="Create new file"
+      on:click={createNewFile}
+      title={`New ${getLanguageOption($selectedLanguage).extension} file`}
+    >
+      <Plus size={13} />
+    </button>
   </div>
 
   <!-- Editor Area -->
@@ -166,30 +394,13 @@
         on:scroll={syncScroll}
         spellcheck={false}
         class="code-input"
-        class:readonly-mode={isTraceMode}
-        readonly={isTraceMode}
       ></textarea>
     </div>
   </div>
 
-  <!-- Trace Controls -->
-  <div class="controls-panel">
-    <button
-      on:click={runTrace}
-      disabled={isTracing}
-      class="trace-button"
-      class:tracing={isTracing}
-    >
-      {#if isTracing}
-        <Loader2 size={14} class="animate-spin" />
-        <span>Interpreting…</span>
-      {:else}
-        <Cpu size={14} />
-        <span>Trace Execution</span>
-      {/if}
-    </button>
-
-    {#if $traceSteps && $traceSteps.length > 0}
+  {#if $traceSteps && $traceSteps.length > 0}
+    <!-- Trace Playback Controls -->
+    <div class="controls-panel">
       <div class="playback-controls">
         <button
           on:click={() => { setCurStep(0); setPlaying(false); }}
@@ -269,8 +480,8 @@
           {curStep + 1} / {total}
         </span>
       </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -286,37 +497,57 @@
   /* File Tab Styling - VS Code like */
   .file-tab {
     display: flex;
-    align-items: stretch;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
     background: #21252b;
     border-bottom: 1px solid #3e4451;
     height: 35px;
+    overflow-x: auto;
+  }
+
+  .tab-shell {
+    display: flex;
+    align-items: center;
+    background: #282c34;
+    border: 1px solid #3e4451;
+    border-bottom: none;
+    border-top: 2px solid transparent;
+    border-radius: 6px 6px 0 0;
+    min-width: 0;
+  }
+
+  .tab-shell.active {
+    border-top-color: #61afef;
   }
 
   .tab-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 16px;
-    background: #282c34;
-    border-right: 1px solid #3e4451;
-    border-top: 2px solid transparent;
+    padding: 0 10px;
+    height: 32px;
+    background: transparent;
+    border: none;
     color: #abb2bf;
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 12px;
     cursor: pointer;
     transition: all 0.15s ease;
+    min-width: 0;
   }
 
-  .tab-item.active {
-    border-top-color: #61afef;
-  }
-
-  .tab-item:hover {
+  .tab-item:hover,
+  .tab-shell.active .tab-item {
     background: #2c313a;
   }
 
   .tab-name {
     color: #e5e5e5;
+    white-space: nowrap;
+    max-width: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .tab-dot {
@@ -324,7 +555,49 @@
     height: 8px;
     border-radius: 50%;
     background: #5c6370;
-    opacity: 0;
+    margin: 0 8px;
+    opacity: 0.5;
+  }
+
+  .tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    margin-right: 4px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #8f96a3;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .tab-close:hover {
+    background: rgba(224, 108, 117, 0.16);
+    color: #e06c75;
+  }
+
+  .new-file-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: 1px solid #3e4451;
+    border-radius: 5px;
+    background: #2c313a;
+    color: #abb2bf;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  .new-file-btn:hover {
+    border-color: #61afef;
+    color: #61afef;
+    background: rgba(97, 175, 239, 0.12);
   }
 
   /* Editor Area */
@@ -423,10 +696,6 @@
     outline: none;
   }
 
-  .code-input.readonly-mode {
-    caret-color: transparent;
-  }
-
   /* Controls Panel */
   .controls-panel {
     background: #21252b;
@@ -436,39 +705,6 @@
     flex-direction: column;
     gap: 10px;
     flex-shrink: 0;
-  }
-
-  /* Trace Button */
-  .trace-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 10px 16px;
-    background: #61afef;
-    border: none;
-    border-radius: 6px;
-    color: #282c34;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .trace-button:hover:not(:disabled) {
-    background: #528bcc;
-    transform: translateY(-1px);
-  }
-
-  .trace-button:active:not(:disabled) {
-    transform: translateY(0);
-  }
-
-  .trace-button.tracing {
-    background: rgba(97, 175, 239, 0.4);
-    cursor: not-allowed;
   }
 
   /* Playback Controls */
@@ -590,13 +826,4 @@
     text-align: right;
   }
 
-  /* Animation for loader */
-  :global(.animate-spin) {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
 </style>
