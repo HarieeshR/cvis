@@ -90,6 +90,13 @@ npm run docker:up:build
 http://localhost:5173
 ```
 
+**Supported cross-platform paths:**
+- Windows: Docker Desktop + `npm run docker:up:build`
+- Linux: Docker or local GCC
+- macOS: Docker or local GCC
+
+If you want the same behavior across devices, use the Docker path on every machine.
+
 ---
 
 ### Option 2: Local Development Mode (Faster for development if you have GCC)
@@ -259,6 +266,9 @@ npm run lint
 
 # Svelte/TypeScript diagnostics only
 npm run check
+
+# Cross-platform backend API smoke test
+npm run test:backend
 ```
 
 ---
@@ -316,6 +326,11 @@ curl -X POST http://localhost:3001/api/compile \
 curl http://localhost:3001/health
 ```
 
+### Cross-platform backend smoke test
+```bash
+npm run test:backend
+```
+
 ---
 
 ## Troubleshooting
@@ -328,6 +343,7 @@ curl http://localhost:3001/health
 ### GCC not found (local mode)
 - Install GCC (see prerequisites)
 - Verify: `gcc --version`
+- On Windows, prefer Docker Desktop instead of host GCC for the most reliable setup
 
 ### Port 3001 already in use
 - Stop other services: `lsof -ti:3001 | xargs kill`

@@ -55,8 +55,18 @@ The backend container includes GCC plus the runtime tools needed for interactive
 ### Run Tests
 
 ```bash
-./test.sh
+npm run test:backend
 ```
+
+### Cross-platform verification
+
+From the repo root:
+
+```bash
+npm run test:backend
+```
+
+That smoke test uses Node instead of Bash, so the same command works on Windows and Linux.
 
 ## API Endpoints
 
@@ -204,7 +214,7 @@ Notes:
 - `lib/c-interpreter.js` - Interpreter-backed trace generation service
 - `lib/http/request-validation.js` - Request normalization/validation + error message helper
 - `package.json` - Dependencies and scripts
-- `test.sh` - Test suite
+- `../scripts/test-backend.mjs` - Cross-platform backend smoke test
 
 ### Temp File Management
 
@@ -225,7 +235,8 @@ Notes:
 - Node.js 16+
 - GCC compiler
 - Docker Desktop or Docker Engine + Compose v2 for the containerized path
-- Linux/macOS/WSL for local host-GCC development
+- Linux/macOS for local host-GCC development
+- Windows is supported through Docker Desktop for the most consistent path
 
 ## Future Enhancements
 

@@ -18,7 +18,8 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "dev:stack": "concurrently -k -n backend,frontend -c green,blue \"npm:backend\" \"npm:dev\"",
-    "dev:all": "node scripts/dev-all.mjs"
+    "dev:all": "node scripts/dev-all.mjs",
+    "test:backend": "node scripts/test-backend.mjs"
   },
   "dependencies": {
     "lucide-svelte": "^0.460.0"
