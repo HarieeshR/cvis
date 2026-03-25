@@ -208,16 +208,7 @@ so you can verify which compiler is active.
 
 ### Optional: Enable AI Code Understanding
 
-If you want the Analysis tab to use a real LLM for semantic code identification instead of only local heuristics, the backend now prefers a local Ollama model first:
-
-```bash
-OLLAMA_MODEL=mistral:7b
-# optional overrides
-OLLAMA_ANALYZE_MODEL=mistral:7b
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-```
-
-If Ollama is not configured, the backend can still use OpenAI as a secondary provider:
+If you want the Analysis tab to use a real LLM for semantic code identification instead of only local heuristics, configure OpenAI on the backend:
 
 ```bash
 OPENAI_API_KEY=your_key_here
@@ -225,7 +216,7 @@ OPENAI_API_KEY=your_key_here
 OPENAI_ANALYZE_MODEL=gpt-5-mini
 ```
 
-Without either provider configured, the app falls back to the built-in local classifier automatically.
+Without OpenAI configured, the app falls back to the built-in local classifier automatically.
 
 ---
 

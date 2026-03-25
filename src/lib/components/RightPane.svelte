@@ -533,7 +533,6 @@
     source: AnalyzeIntentResult['source'],
     engine?: AnalyzeIntentResult['engine']
   ): string {
-    if (source === 'ai' && engine?.startsWith('ollama:')) return 'Ollama semantic read';
     if (source === 'ai' && engine?.startsWith('openai:')) return 'AI semantic read';
     if (source === 'ai') return 'AI semantic read';
     if (source === 'heuristic-fallback') return 'Heuristic fallback';

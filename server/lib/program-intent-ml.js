@@ -360,11 +360,8 @@ function analyzeProgramIntentHeuristic(code) {
   };
 }
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
-const OLLAMA_ANALYZE_MODEL = process.env.OLLAMA_ANALYZE_MODEL || process.env.OLLAMA_MODEL || 'mistral:7b';
 const OPENAI_RESPONSES_URL = process.env.OPENAI_RESPONSES_URL || 'https://api.openai.com/v1/responses';
 const OPENAI_ANALYZE_MODEL = process.env.OPENAI_ANALYZE_MODEL || process.env.OPENAI_MODEL || 'gpt-5-mini';
-const OLLAMA_TIMEOUT_MS = Number.parseInt(process.env.OLLAMA_TIMEOUT_MS || '45000', 10);
 const OPENAI_TIMEOUT_MS = Number.parseInt(process.env.OPENAI_TIMEOUT_MS || '20000', 10);
 const INTENT_ENUM = Object.keys(LABELS);
 const INTENT_ALIASES = {
@@ -440,27 +437,6 @@ const AI_RESULT_SCHEMA = {
     'sectionPurposes',
     'optimizationIdeas'
   ]
-};
-
-const OLLAMA_RESULT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    primaryIntent: {
-      type: 'string'
-    },
-    confidence: {
-      type: 'number'
-    },
-    summary: {
-      type: 'string'
-    },
-    explanation: {
-      type: 'array',
-      items: { type: 'string' }
-    }
-  },
-  required: ['primaryIntent', 'confidence', 'summary', 'explanation']
 };
 
 function clipCodeForModel(code) {
@@ -572,37 +548,6 @@ function normalizeAiResult(aiResult, heuristicResult, engine) {
   };
 }
 
-function enrichCompactAiResult(aiResult, heuristicResult) {
-  const primaryIntent = normalizeIntent(
-    aiResult?.primaryIntent,
-    `${aiResult?.summary ?? ''} ${(aiResult?.explanation ?? []).join(' ')}`
-  );
-  const inferredSignals = heuristicResult.matchedSignals.slice(0, 4);
-
-  return {
-    primaryIntent,
-    confidence: Number(aiResult?.confidence) || heuristicResult.confidence,
-    matchedSignals: inferredSignals,
-    summary: typeof aiResult?.summary === 'string' ? aiResult.summary : heuristicResult.summary,
-    explanation: Array.isArray(aiResult?.explanation) ? aiResult.explanation : heuristicResult.explanation,
-    candidates: [
-      {
-        intent: primaryIntent,
-        confidence: Number(aiResult?.confidence) || heuristicResult.confidence
-      },
-      ...((heuristicResult.candidates ?? [])
-        .filter((candidate) => candidate.intent !== primaryIntent)
-        .slice(0, 2)
-        .map((candidate) => ({
-          intent: candidate.intent,
-          confidence: candidate.confidence
-        })))
-    ],
-    sectionPurposes: [],
-    optimizationIdeas: []
-  };
-}
-
 function buildAiPrompt(code, heuristicResult) {
   return [
     'Analyze this C code by behavior and structure, not by variable names alone.',
@@ -632,30 +577,6 @@ function buildAiPrompt(code, heuristicResult) {
   ].join('\n');
 }
 
-function buildOllamaPrompt(code, heuristicResult) {
-  return [
-    'Classify this C code by behavior, not by variable names.',
-    'Return short JSON only.',
-    'Fields:',
-    '- primaryIntent',
-    '- confidence',
-    '- summary',
-    '- explanation',
-    'Heuristic hints for weak context only:',
-    JSON.stringify(
-      {
-        primaryIntent: heuristicResult.primaryIntent,
-        primaryLabel: heuristicResult.primaryLabel,
-        matchedSignals: heuristicResult.matchedSignals
-      },
-      null,
-      2
-    ),
-    'Code:',
-    `\`\`\`c\n${clipCodeForModel(code)}\n\`\`\``
-  ].join('\n');
-}
-
 async function fetchJsonWithTimeout(url, options, timeoutMs, timeoutLabel) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -674,60 +595,6 @@ async function fetchJsonWithTimeout(url, options, timeoutMs, timeoutLabel) {
   } finally {
     clearTimeout(timeoutId);
   }
-}
-
-async function analyzeProgramIntentWithOllama(code, heuristicResult) {
-  if (!OLLAMA_ANALYZE_MODEL) {
-    return null;
-  }
-
-  const response = await fetchJsonWithTimeout(
-    `${OLLAMA_BASE_URL.replace(/\/$/, '')}/api/chat`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: OLLAMA_ANALYZE_MODEL,
-        stream: false,
-        format: OLLAMA_RESULT_SCHEMA,
-        options: {
-          temperature: 0
-        },
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You classify C programs by semantics, control flow, and data behavior. Do not rely on names alone. Return concise JSON only.'
-          },
-          {
-            role: 'user',
-            content: buildOllamaPrompt(code, heuristicResult)
-          }
-        ]
-      })
-    },
-    OLLAMA_TIMEOUT_MS,
-    'Ollama analysis'
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => response.statusText);
-    throw new Error(`Ollama analyze request failed: ${errorText}`);
-  }
-
-  const body = await response.json();
-  const text = typeof body?.message?.content === 'string' ? body.message.content.trim() : '';
-  if (!text) {
-    throw new Error('Ollama analyze request returned an empty response.');
-  }
-
-  return normalizeAiResult(
-    enrichCompactAiResult(JSON.parse(text), heuristicResult),
-    heuristicResult,
-    `ollama:${OLLAMA_ANALYZE_MODEL}`
-  );
 }
 
 async function analyzeProgramIntentWithOpenAI(code, heuristicResult) {
@@ -803,25 +670,6 @@ async function analyzeProgramIntentWithOpenAI(code, heuristicResult) {
 
 export async function analyzeProgramIntent(code) {
   const heuristicResult = analyzeProgramIntentHeuristic(code);
-
-  if (OLLAMA_ANALYZE_MODEL) {
-    try {
-      return await analyzeProgramIntentWithOllama(code, heuristicResult);
-    } catch (error) {
-      console.warn('Ollama semantic analysis failed:', error instanceof Error ? error.message : error);
-      if (!process.env.OPENAI_API_KEY) {
-        const fallbackExplanation = heuristicResult.explanation ? [...heuristicResult.explanation] : [];
-        fallbackExplanation.unshift('Ollama semantic analysis was unavailable, so the app fell back to the local classifier.');
-
-        return {
-          ...heuristicResult,
-          source: 'heuristic-fallback',
-          engine: `${heuristicResult.engine}-fallback`,
-          explanation: fallbackExplanation
-        };
-      }
-    }
-  }
 
   if (!process.env.OPENAI_API_KEY) {
     return heuristicResult;

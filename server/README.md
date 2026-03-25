@@ -7,7 +7,7 @@ Express.js backend server that provides GCC compilation and execution endpoints 
 - ✅ **Compile C Code**: Compile C source code using GCC
 - ✅ **Execute Binaries**: Run compiled binaries with input/output capture
 - ✅ **Trace Execution**: Deterministic line-by-line execution trace for visualization
-- ✅ **AI Code Understanding**: Optional semantic code identification with Ollama, OpenAI fallback, plus local heuristic fallback
+- ✅ **AI Code Understanding**: Optional semantic code identification with OpenAI plus local heuristic fallback
 - ✅ **Error Handling**: Comprehensive error messages and validation
 - ✅ **Timeout Protection**: 5-10 second timeouts to prevent hanging
 - ✅ **Auto Cleanup**: Automatic temp file cleanup after execution
@@ -261,9 +261,7 @@ Notes:
 - **Execution Output Limit**: 1 MB combined stdout/stderr
 - **GCC Path**: Prefers a project-scoped compiler before falling back to system `gcc`
 - **Managed Toolchain**: `.cvis-toolchain/install.json` plus the extracted toolchain under `.cvis-toolchain/toolchains/`
-- **Ollama Model**: `OLLAMA_MODEL` or `OLLAMA_ANALYZE_MODEL`, default `mistral:7b`
-- **Ollama Base URL**: `OLLAMA_BASE_URL`, default `http://127.0.0.1:11434`
-- **OpenAI Fallback**: `OPENAI_API_KEY` with `OPENAI_ANALYZE_MODEL` or `OPENAI_MODEL`, default `gpt-5-mini`
+- **OpenAI Analysis**: `OPENAI_API_KEY` with `OPENAI_ANALYZE_MODEL` or `OPENAI_MODEL`, default `gpt-5-mini`
 
 ## Architecture
 
