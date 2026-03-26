@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 const rootDir = process.cwd();
+const tsxCli = path.join(rootDir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const backendPort = 3301;
 const backendHost = '127.0.0.1';
 const frontendPort = 4300;
@@ -48,7 +50,7 @@ async function waitFor(url, label, timeoutMs = 30_000) {
 }
 
 async function main() {
-  const backend = spawnNode(['server/index.js'], {
+  const backend = spawnNode([tsxCli, 'server/index.ts'], {
     NODE_ENV: 'production',
     PORT: String(backendPort),
     BACKEND_HOST: backendHost,

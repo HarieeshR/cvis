@@ -35,7 +35,16 @@ async function main() {
   assert(health.res.ok, 'Health check failed');
   assert(typeof health.body?.gccSource === 'string', 'gccSource missing from health response');
   assert('gccVersion' in (health.body ?? {}), 'gccVersion missing from health response');
+  assert(typeof health.body?.httpsConfigured === 'boolean', 'httpsConfigured missing from health response');
+  assert(typeof health.body?.httpsRequired === 'boolean', 'httpsRequired missing from health response');
+  assert(health.res.headers.get('x-content-type-options') === 'nosniff', 'nosniff header missing');
+  assert(health.res.headers.get('x-frame-options') === 'DENY', 'frame protection header missing');
+  assert(
+    (health.res.headers.get('cache-control') || '').includes('no-store'),
+    'Cache-Control no-store header missing'
+  );
   log(`✓ Health: ${JSON.stringify(health.body)}`);
+  log('✓ Security headers present on health response');
   log('');
 
   log('Test 2: Reject malformed JSON body');

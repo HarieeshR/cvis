@@ -51,9 +51,22 @@ BACKEND_HOST=127.0.0.1
 FRONTEND_URL=https://your-frontend.example.com
 # or multiple allowed browser origins:
 CORS_ORIGINS=https://app.example.com,https://staging.example.com
+
+# if TLS terminates at a reverse proxy
+TRUST_PROXY=true
+REQUIRE_HTTPS=true
+
+# direct TLS on the backend instead of proxy termination
+TLS_KEY_FILE=/etc/ssl/private/cvis.key
+TLS_CERT_FILE=/etc/ssl/certs/cvis.crt
+# optional
+TLS_CA_FILE=/etc/ssl/certs/ca-chain.crt
+TLS_PASSPHRASE=change-me
+HTTPS_PUBLIC_ORIGIN=https://api.example.com
 ```
 
 If the frontend and backend are deployed behind the same reverse proxy, you can usually keep browser traffic same-origin by routing `/api` to the backend service.
+The backend now sends API-focused security headers, supports direct HTTPS with TLS files, and can enforce HTTPS behind a trusted reverse proxy when `REQUIRE_HTTPS=true`.
 
 ### Start in Docker (fallback)
 
@@ -279,15 +292,15 @@ Notes:
 
 ### Files
 
-- `index.js` - Server bootstrap and startup checks
-- `app.js` - Express app assembly (middleware + routes)
+- `index.ts` - Server bootstrap and startup checks
+- `app.ts` - Express app assembly (middleware + routes)
 - `config/constants.js` - Shared limits and configuration
-- `routes/index.js` - Health + API route handlers
+- `routes/index.ts` - Health + API route handlers
 - `lib/gcc-path.js` - GCC discovery and startup verification
 - `lib/compile-c.js` - Compilation service
 - `lib/run-binary.js` - Binary execution service
 - `lib/c-interpreter.js` - Interpreter-backed trace generation service
-- `lib/http/request-validation.js` - Request normalization/validation + error message helper
+- `lib/http/request-validation.ts` - Request normalization/validation + error message helper
 - `package.json` - Dependencies and scripts
 - `../scripts/test-backend.mjs` - Cross-platform backend smoke test
 

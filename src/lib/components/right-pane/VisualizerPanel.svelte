@@ -1,8 +1,23 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { AlertTriangle, Cpu, Loader2, Play } from 'lucide-svelte';
+  import {
+    AlertTriangle,
+    ChevronLeft,
+    ChevronRight,
+    Cpu,
+    Loader2,
+    Pause,
+    Play,
+    SkipBack,
+    SkipForward
+  } from 'lucide-svelte';
   import type { VisualizerViewModel } from '$lib/app-shell/right-pane/view-models';
   import Visualizer from '$lib/components/Visualizer.svelte';
+  import {
+    currentStepIndex,
+    isPlaying,
+    traceSteps as traceStepsStore
+  } from '$lib/stores';
   import { normalizeTerminalText } from '$lib/terminal/console-input';
   import { VISUALIZER_FEATURES } from '$lib/components/right-pane-config';
 
@@ -21,10 +36,12 @@
   $: traceConsoleStatus = viewModel.traceConsoleStatus;
   $: isTracing = viewModel.isTracing;
   $: traceErr = viewModel.traceErr;
-  $: traceSteps = viewModel.traceSteps;
+  $: traceStepList = viewModel.traceSteps;
   $: currentTraceStepData = viewModel.currentTraceStepData;
   $: loadingSteps = viewModel.loadingSteps;
   $: intentPrimaryLabel = viewModel.intentPrimaryLabel;
+  $: totalSteps = $traceStepsStore.length;
+  $: isTraceComplete = totalSteps > 0 && $currentStepIndex >= totalSteps - 1;
 
   $: {
     if (isTracing && typeof window !== 'undefined') {
@@ -48,6 +65,39 @@
       clearInterval(loadingTicker);
     }
   });
+
+  function goToTraceStart() {
+    isPlaying.set(false);
+    currentStepIndex.set(0);
+  }
+
+  function goToTraceEnd() {
+    if (totalSteps === 0) return;
+    isPlaying.set(false);
+    currentStepIndex.set(totalSteps - 1);
+  }
+
+  function stepTrace(delta: number) {
+    if (totalSteps === 0) return;
+    isPlaying.set(false);
+    currentStepIndex.update((index) => Math.max(0, Math.min(totalSteps - 1, index + delta)));
+  }
+
+  function toggleTracePlayback() {
+    if (totalSteps === 0) return;
+
+    if (!$isPlaying && $currentStepIndex >= totalSteps - 1) {
+      currentStepIndex.set(0);
+    }
+
+    isPlaying.update((playing) => !playing);
+  }
+
+  function clearTracePlayback() {
+    isPlaying.set(false);
+    currentStepIndex.set(0);
+    traceStepsStore.set([]);
+  }
 </script>
 
 <div class="visualizer-tab-shell">
@@ -74,16 +124,16 @@
           </span>
           <button
             type="button"
-            class="trace-runtime-run"
+            class="trace-runtime-run trace-runtime-run-primary"
             disabled={isTracing || (traceUsesRuntimeInput && !hasCapturedRunInput)}
             on:click={onTrace}
           >
             {#if isTracing}
               <Loader2 size={14} class="loader-spin" />
-              <span>Tracing…</span>
+              <span>Interpreting…</span>
             {:else}
-              <Play size={13} />
-              <span>{traceSteps.length > 0 ? 'Retrace' : 'Trace now'}</span>
+              <Cpu size={14} />
+              <span>{traceStepList.length > 0 ? 'Retrace Execution' : 'Trace Execution'}</span>
             {/if}
           </button>
         </div>
@@ -99,6 +149,74 @@
       {#if traceConsoleOutput}
         <pre class="trace-runtime-output">{normalizeTerminalText(traceConsoleOutput)}</pre>
       {/if}
+    </section>
+  {/if}
+
+  {#if traceStepList.length > 0}
+    <section class="trace-playback-card">
+      <div class="trace-playback-head">
+        <div class="trace-playback-copy">
+          <span class="trace-playback-title">Trace playback</span>
+          <span class="trace-playback-meta">
+            line {currentTraceStepData?.lineNo ?? '—'} · step {$currentStepIndex + 1} / {totalSteps}
+          </span>
+        </div>
+        {#if isTraceComplete}
+          <span class="trace-complete-pill">Trace complete</span>
+        {/if}
+      </div>
+
+      <div class="trace-playback-actions">
+        <div class="trace-playback-buttons">
+          <button
+            type="button"
+            class="trace-playback-btn trace-playback-icon"
+            on:click={goToTraceStart}
+            title="Go to start"
+          >
+            <SkipBack size={14} />
+          </button>
+          <button
+            type="button"
+            class="trace-playback-btn"
+            on:click={() => stepTrace(-1)}
+            disabled={$currentStepIndex === 0}
+          >
+            <ChevronLeft size={15} />
+            <span>Prev</span>
+          </button>
+          <button type="button" class="trace-playback-btn trace-playback-primary" on:click={toggleTracePlayback}>
+            {#if $isPlaying}
+              <Pause size={15} />
+              <span>Pause</span>
+            {:else}
+              <Play size={15} />
+              <span>{isTraceComplete ? 'Replay' : 'Play'}</span>
+            {/if}
+          </button>
+          <button
+            type="button"
+            class="trace-playback-btn"
+            on:click={() => stepTrace(1)}
+            disabled={$currentStepIndex >= totalSteps - 1}
+          >
+            <span>Next</span>
+            <ChevronRight size={15} />
+          </button>
+          <button
+            type="button"
+            class="trace-playback-btn trace-playback-icon"
+            on:click={goToTraceEnd}
+            title="Go to end"
+          >
+            <SkipForward size={14} />
+          </button>
+        </div>
+
+        <button type="button" class="trace-playback-reset" on:click={clearTracePlayback}>
+          Clear trace
+        </button>
+      </div>
     </section>
   {/if}
 
@@ -141,7 +259,7 @@
           </div>
         </div>
       </div>
-    {:else if traceSteps && traceSteps.length > 0}
+    {:else if traceStepList && traceStepList.length > 0}
       <Visualizer traceStep={currentTraceStepData} />
     {:else}
       <div class="empty-visualizer">

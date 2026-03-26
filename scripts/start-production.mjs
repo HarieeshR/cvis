@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const rootDir = process.cwd();
 const buildDir = path.join(rootDir, 'build');
+const tsxCli = path.join(rootDir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 
 if (!existsSync(buildDir)) {
   console.error('Production build not found.');
@@ -82,7 +83,7 @@ function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-spawnNode('backend', ['server/index.js'], {
+spawnNode('backend', [tsxCli, 'server/index.ts'], {
   NODE_ENV: 'production',
   PORT: backendPort,
   BACKEND_HOST: backendHost,

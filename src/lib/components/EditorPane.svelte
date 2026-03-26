@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { Cpu, FileText, Loader2 } from 'lucide-svelte';
-  import { createEventDispatcher } from 'svelte';
+  import { FileText } from 'lucide-svelte';
   import highlight from '$lib/highlight';
-  import { currentStepIndex, editorCode, traceSteps } from '$lib/stores';
+  import { currentStepIndex, editorCode, isPlaying, traceSteps } from '$lib/stores';
 
   const LINE_HEIGHT_PX = 22;
   const EDITOR_PADDING_PX = 12;
@@ -15,12 +14,6 @@
     '"': '"',
     "'": "'"
   };
-
-  const dispatch = createEventDispatcher<{
-    trace: void;
-  }>();
-
-  export let isTracing = false;
 
   let code = $editorCode;
   let hlLine: number | null = null;
@@ -39,7 +32,6 @@
   $: total = $traceSteps.length;
   $: curStep = $currentStepIndex;
   $: isTraceMode = total > 0;
-  $: activeTraceStep = isTraceMode ? $traceSteps[curStep] ?? null : null;
   $: currentLineTop = hlLine
     ? (hlLine - 1) * LINE_HEIGHT_PX + EDITOR_PADDING_PX - scrollTop
     : null;
@@ -118,10 +110,6 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if (isTraceMode) {
-      return;
-    }
-
     const start = taRef.selectionStart;
     const end = taRef.selectionEnd;
     const selectedText = code.slice(start, end);
@@ -233,19 +221,12 @@
   }
 
   function handleCodeChange() {
-    if (isTraceMode) {
-      code = $editorCode;
-      return;
-    }
-
     $editorCode = code;
+    isPlaying.set(false);
+    currentStepIndex.set(0);
     traceSteps.set([]);
   }
 
-  async function runTrace() {
-    if (isTracing) return;
-    dispatch('trace');
-  }
 </script>
 
 <div class="editor-pane">
@@ -290,41 +271,10 @@
         wrap="off"
         spellcheck={false}
         class="code-input"
-        class:readonly-mode={isTraceMode}
-        readonly={isTraceMode}
       ></textarea>
     </div>
   </div>
 
-  <!-- Trace Controls -->
-  <div class="controls-panel">
-    <button
-      on:click={runTrace}
-      disabled={isTracing}
-      class="trace-button"
-      class:tracing={isTracing}
-    >
-      {#if isTracing}
-        <Loader2 size={14} class="animate-spin" />
-        <span>Interpreting…</span>
-      {:else}
-        <Cpu size={14} />
-        <span>{isTraceMode ? 'Retrace Execution' : 'Trace Execution'}</span>
-      {/if}
-    </button>
-
-    {#if isTraceMode}
-      <div class="trace-status">
-        <div class="trace-status-copy">
-          <span class="trace-status-label">Trace is active in the Visualizer panel</span>
-          <span class="trace-status-meta">
-            line {activeTraceStep?.lineNo ?? '—'} · step {curStep + 1} / {total}
-          </span>
-        </div>
-        <span class="trace-status-chip">Right panel controls</span>
-      </div>
-    {/if}
-  </div>
 </div>
 
 <style>
@@ -487,103 +437,4 @@
     outline: none;
   }
 
-  .code-input.readonly-mode {
-    caret-color: transparent;
-  }
-
-  /* Controls Panel */
-  .controls-panel {
-    background: #21252b;
-    border-top: 1px solid #3e4451;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    flex-shrink: 0;
-  }
-
-  /* Trace Button */
-  .trace-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 10px 16px;
-    background: #61afef;
-    border: none;
-    border-radius: 6px;
-    color: #282c34;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .trace-button:hover:not(:disabled) {
-    background: #528bcc;
-    transform: translateY(-1px);
-  }
-
-  .trace-button:active:not(:disabled) {
-    transform: translateY(0);
-  }
-
-  .trace-button.tracing {
-    background: rgba(97, 175, 239, 0.4);
-    cursor: not-allowed;
-  }
-
-  .trace-status {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-    border: 1px solid rgba(97, 175, 239, 0.2);
-    background: rgba(97, 175, 239, 0.08);
-    border-radius: 8px;
-    padding: 10px 12px;
-  }
-
-  .trace-status-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .trace-status-label {
-    color: #e5e5e5;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-
-  .trace-status-meta {
-    color: #abb2bf;
-    font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .trace-status-chip {
-    color: #61afef;
-    border: 1px solid rgba(97, 175, 239, 0.28);
-    background: rgba(97, 175, 239, 0.12);
-    border-radius: 999px;
-    padding: 4px 8px;
-    font-size: 10px;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-
-  /* Animation for loader */
-  :global(.animate-spin) {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
 </style>

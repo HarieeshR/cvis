@@ -10,6 +10,7 @@ import {
 } from '../run-session.js';
 import { traceExecution } from '../c-interpreter.js';
 import { analyzeProgramIntent } from '../program-intent-ml.js';
+import type { RequestLike, ResponseLike } from './http-types.ts';
 import {
   getErrorMessage,
   getLanguageLabel,
@@ -19,7 +20,7 @@ import {
   normalizeInput,
   normalizeJsonBody,
   validateCode
-} from './request-validation.js';
+} from './request-validation.ts';
 import {
   analyzeServerErrorResponse,
   analyzeValidationResponse,
@@ -29,21 +30,28 @@ import {
   runValidationResponse,
   traceServerErrorResponse,
   traceValidationResponse
-} from './route-responses.js';
+} from './route-responses.ts';
 
-export async function healthHandler(_req, res) {
+function queryStringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+export async function healthHandler(req: RequestLike, res: ResponseLike) {
   const gcc = await getGccHealthDetails();
-  res.json({
+  return res.json({
     status: 'ok',
     ...gcc,
+    requestProtocol: req.protocol ?? (req.secure ? 'https' : 'http'),
+    httpsConfigured: Boolean(process.env.TLS_KEY_FILE && process.env.TLS_CERT_FILE),
+    httpsRequired: process.env.REQUIRE_HTTPS === 'true',
     environment: process.env.DOCKER_ENV ? 'docker' : 'local',
     timestamp: new Date().toISOString()
   });
 }
 
-export async function compileHandler(req, res) {
+export async function compileHandler(req: RequestLike, res: ResponseLike) {
   const bodyResult = normalizeJsonBody(req.body);
-  if (bodyResult.error) {
+  if ('error' in bodyResult) {
     return res.status(400).json(compileValidationResponse(bodyResult.error));
   }
 
@@ -54,11 +62,13 @@ export async function compileHandler(req, res) {
     return res.status(400).json(compileValidationResponse(codeError));
   }
 
+  const sourceCode = code as string;
+
   const languageLabel = getLanguageLabel(language);
-  console.log(`Compiling ${Buffer.byteLength(code, 'utf8')} bytes of ${languageLabel} code...`);
+  console.log(`Compiling ${Buffer.byteLength(sourceCode, 'utf8')} bytes of ${languageLabel} code...`);
 
   try {
-    const result = await compileC(code);
+    const result = await compileC(sourceCode);
 
     if (result.success) {
       console.log(`✓ Compilation successful in ${result.compilationTime}ms`);
@@ -73,26 +83,28 @@ export async function compileHandler(req, res) {
   }
 }
 
-export async function runHandler(req, res) {
+export async function runHandler(req: RequestLike, res: ResponseLike) {
   const bodyResult = normalizeJsonBody(req.body);
-  if (bodyResult.error) {
+  if ('error' in bodyResult) {
     return res.status(400).json(runValidationResponse(bodyResult.error));
   }
 
   const { binaryPath, args, input } = bodyResult.value;
 
   const binaryPathResult = normalizeBinaryPath(binaryPath);
-  if (binaryPathResult.error) {
-    return res.status(400).json(runValidationResponse(binaryPathResult.error, 'No binary path provided'));
+  if ('error' in binaryPathResult) {
+    return res.status(400).json(
+      runValidationResponse(binaryPathResult.error, 'No binary path provided')
+    );
   }
 
   const argsResult = normalizeArgs(args);
-  if (argsResult.error) {
+  if ('error' in argsResult) {
     return res.status(400).json(runValidationResponse(argsResult.error, 'Invalid args'));
   }
 
   const inputResult = normalizeInput(input);
-  if (inputResult.error) {
+  if ('error' in inputResult) {
     return res.status(400).json(runValidationResponse(inputResult.error, 'Invalid input'));
   }
 
@@ -114,20 +126,20 @@ export async function runHandler(req, res) {
   }
 }
 
-export async function runStartHandler(req, res) {
+export async function runStartHandler(req: RequestLike, res: ResponseLike) {
   const bodyResult = normalizeJsonBody(req.body);
-  if (bodyResult.error) {
+  if ('error' in bodyResult) {
     return res.status(400).json({ success: false, error: bodyResult.error });
   }
 
   const { binaryPath, args } = bodyResult.value;
   const binaryPathResult = normalizeBinaryPath(binaryPath);
-  if (binaryPathResult.error) {
+  if ('error' in binaryPathResult) {
     return res.status(400).json({ success: false, error: binaryPathResult.error });
   }
 
   const argsResult = normalizeArgs(args);
-  if (argsResult.error) {
+  if ('error' in argsResult) {
     return res.status(400).json({ success: false, error: argsResult.error });
   }
 
@@ -143,8 +155,8 @@ export async function runStartHandler(req, res) {
   }
 }
 
-export function runPollHandler(req, res) {
-  const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : '';
+export function runPollHandler(req: RequestLike, res: ResponseLike) {
+  const sessionId = queryStringValue(req.query?.sessionId);
   if (!sessionId) {
     return res.status(400).json({ success: false, error: 'sessionId query parameter is required' });
   }
@@ -174,9 +186,9 @@ export function runPollHandler(req, res) {
   });
 }
 
-export function runInputHandler(req, res) {
+export function runInputHandler(req: RequestLike, res: ResponseLike) {
   const bodyResult = normalizeJsonBody(req.body);
-  if (bodyResult.error) {
+  if ('error' in bodyResult) {
     return res.status(400).json({ success: false, error: bodyResult.error });
   }
 
@@ -185,7 +197,12 @@ export function runInputHandler(req, res) {
     return res.status(400).json({ success: false, error: 'sessionId is required' });
   }
 
-  const result = sendRunInput(sessionId, input);
+  const inputResult = normalizeInput(input);
+  if ('error' in inputResult) {
+    return res.status(400).json({ success: false, error: inputResult.error });
+  }
+
+  const result = sendRunInput(sessionId, inputResult.value);
   if (!result.success) {
     return res.status(400).json(result);
   }
@@ -193,9 +210,9 @@ export function runInputHandler(req, res) {
   return res.json(result);
 }
 
-export function runEofHandler(req, res) {
+export function runEofHandler(req: RequestLike, res: ResponseLike) {
   const bodyResult = normalizeJsonBody(req.body);
-  if (bodyResult.error) {
+  if ('error' in bodyResult) {
     return res.status(400).json({ success: false, error: bodyResult.error });
   }
 
@@ -212,9 +229,9 @@ export function runEofHandler(req, res) {
   return res.json(result);
 }
 
-export function runStopHandler(req, res) {
+export function runStopHandler(req: RequestLike, res: ResponseLike) {
   const bodyResult = normalizeJsonBody(req.body);
-  if (bodyResult.error) {
+  if ('error' in bodyResult) {
     return res.status(400).json({ success: false, error: bodyResult.error });
   }
 
@@ -231,9 +248,9 @@ export function runStopHandler(req, res) {
   return res.json(result);
 }
 
-export async function traceHandler(req, res) {
+export async function traceHandler(req: RequestLike, res: ResponseLike) {
   const bodyResult = normalizeJsonBody(req.body);
-  if (bodyResult.error) {
+  if ('error' in bodyResult) {
     return res.status(400).json(traceValidationResponse(bodyResult.error));
   }
 
@@ -243,17 +260,21 @@ export async function traceHandler(req, res) {
     return res.status(400).json(traceValidationResponse(codeError, 'No code provided'));
   }
 
+  const sourceCode = code as string;
+
   const breakpointResult = normalizeBreakpoints(breakpoints);
-  if (breakpointResult.error) {
+  if ('error' in breakpointResult) {
     return res.status(400).json(traceValidationResponse(breakpointResult.error));
   }
 
   const inputResult = normalizeInput(input);
-  if (inputResult.error) {
-    return res.status(400).json(traceValidationResponse(inputResult.error, 'Invalid trace input'));
+  if ('error' in inputResult) {
+    return res
+      .status(400)
+      .json(traceValidationResponse(inputResult.error, 'Invalid trace input'));
   }
 
-  const maxLine = code.split(/\r?\n/).length;
+  const maxLine = sourceCode.split(/\r?\n/).length;
   const outOfRangeBreakpoint = breakpointResult.value.find((lineNo) => lineNo > maxLine);
   if (outOfRangeBreakpoint) {
     return res.status(400).json(
@@ -264,7 +285,7 @@ export async function traceHandler(req, res) {
   console.log(`Tracing code with ${breakpointResult.value.length} breakpoints...`);
 
   try {
-    const result = await traceExecution(code, breakpointResult.value, inputResult.value);
+    const result = await traceExecution(sourceCode, breakpointResult.value, inputResult.value);
     console.log(`✓ Trace complete: ${result.totalSteps} steps`);
     return res.json(result);
   } catch (err) {
@@ -273,9 +294,9 @@ export async function traceHandler(req, res) {
   }
 }
 
-export async function analyzeIntentHandler(req, res) {
+export async function analyzeIntentHandler(req: RequestLike, res: ResponseLike) {
   const bodyResult = normalizeJsonBody(req.body);
-  if (bodyResult.error) {
+  if ('error' in bodyResult) {
     return res.status(400).json(analyzeValidationResponse(bodyResult.error));
   }
 
@@ -285,8 +306,10 @@ export async function analyzeIntentHandler(req, res) {
     return res.status(400).json(analyzeValidationResponse(codeError));
   }
 
+  const sourceCode = code as string;
+
   try {
-    const result = await analyzeProgramIntent(code);
+    const result = await analyzeProgramIntent(sourceCode);
     return res.json(result);
   } catch (err) {
     console.error('Intent analysis error:', err);

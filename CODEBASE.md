@@ -18,15 +18,15 @@ This is the quick orientation guide for the repository.
 
 ## Backend (`server/`)
 
-- `index.js`
+- `index.ts`
   - Process entrypoint and startup checks (GCC + server listen).
-- `app.js`
+- `app.ts`
   - Express composition (middleware, route registration, handlers).
-- `routes/index.js`
+- `routes/index.ts`
   - Route module for `GET /health`, `POST /api/compile`, `POST /api/run`, `POST /api/trace`.
 - `config/constants.js`
   - Limits and shared runtime settings.
-- `lib/http/request-validation.js`
+- `lib/http/request-validation.ts`
   - Request validation/normalization and safe error-message helper.
 - `lib/compile-c.js`
   - GCC compilation service.

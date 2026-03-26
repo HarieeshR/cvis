@@ -1,18 +1,20 @@
 import { REQUEST_LIMITS } from '../../config/constants.js';
 
-export function getErrorMessage(err, fallback = 'Internal server error') {
+export type Result<T> = { value: T } | { error: string };
+
+export function getErrorMessage(err: unknown, fallback = 'Internal server error'): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
-export function normalizeJsonBody(body) {
+export function normalizeJsonBody(body: unknown): Result<Record<string, unknown>> {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return { error: 'Request body must be a JSON object' };
   }
 
-  return { value: body };
+  return { value: body as Record<string, unknown> };
 }
 
-export function validateCode(code) {
+export function validateCode(code: unknown): string | null {
   if (typeof code !== 'string') {
     return 'Request body must contain a string "code" field';
   }
@@ -29,7 +31,7 @@ export function validateCode(code) {
   return null;
 }
 
-export function normalizeArgs(args) {
+export function normalizeArgs(args: unknown): Result<string[]> {
   if (args === undefined) {
     return { value: [] };
   }
@@ -52,10 +54,10 @@ export function normalizeArgs(args) {
     return { error: '"args" values must be string, number, or boolean' };
   }
 
-  return { value: normalized };
+  return { value: normalized.filter((arg): arg is string => arg !== null) };
 }
 
-export function normalizeInput(input) {
+export function normalizeInput(input: unknown): Result<string> {
   if (input === undefined) {
     return { value: '' };
   }
@@ -72,7 +74,7 @@ export function normalizeInput(input) {
   return { value: input };
 }
 
-export function normalizeBreakpoints(breakpoints) {
+export function normalizeBreakpoints(breakpoints: unknown): Result<number[]> {
   if (breakpoints === undefined) {
     return { value: [] };
   }
@@ -92,7 +94,7 @@ export function normalizeBreakpoints(breakpoints) {
   return { value: [...new Set(breakpoints)] };
 }
 
-export function normalizeBinaryPath(binaryPath) {
+export function normalizeBinaryPath(binaryPath: unknown): Result<string> {
   if (typeof binaryPath !== 'string' || !binaryPath.trim()) {
     return { error: 'Request body must contain a non-empty string "binaryPath" field' };
   }
@@ -100,6 +102,6 @@ export function normalizeBinaryPath(binaryPath) {
   return { value: binaryPath.trim() };
 }
 
-export function getLanguageLabel(language) {
+export function getLanguageLabel(language: unknown): string {
   return typeof language === 'string' && language.trim() ? language : 'C';
 }

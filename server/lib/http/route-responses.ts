@@ -1,6 +1,6 @@
-import { getErrorMessage } from './request-validation.js';
+import { getErrorMessage } from './request-validation.ts';
 
-export function compileValidationResponse(message) {
+export function compileValidationResponse(message: string) {
   return {
     success: false,
     error: 'Invalid compile request',
@@ -10,7 +10,7 @@ export function compileValidationResponse(message) {
   };
 }
 
-export function compileServerErrorResponse(message) {
+export function compileServerErrorResponse(message: string) {
   return {
     success: false,
     errors: [message],
@@ -19,7 +19,7 @@ export function compileServerErrorResponse(message) {
   };
 }
 
-export function runValidationResponse(message, error = 'Invalid run request') {
+export function runValidationResponse(message: string, error = 'Invalid run request') {
   return {
     error,
     stdout: '',
@@ -30,7 +30,7 @@ export function runValidationResponse(message, error = 'Invalid run request') {
   };
 }
 
-export function runServerErrorResponse(message) {
+export function runServerErrorResponse(message: string) {
   return {
     exitCode: 1,
     stdout: '',
@@ -40,7 +40,7 @@ export function runServerErrorResponse(message) {
   };
 }
 
-export function traceValidationResponse(message, error = 'Invalid trace request') {
+export function traceValidationResponse(message: string, error = 'Invalid trace request') {
   return {
     error,
     success: false,
@@ -50,7 +50,7 @@ export function traceValidationResponse(message, error = 'Invalid trace request'
   };
 }
 
-export function traceServerErrorResponse(message) {
+export function traceServerErrorResponse(message: string) {
   return {
     success: false,
     errors: [message],
@@ -59,7 +59,7 @@ export function traceServerErrorResponse(message) {
   };
 }
 
-export function analyzeValidationResponse(message) {
+export function analyzeValidationResponse(message: string) {
   return {
     success: false,
     error: 'Invalid analyze request',
@@ -78,7 +78,7 @@ export function analyzeValidationResponse(message) {
   };
 }
 
-export function analyzeServerErrorResponse(err) {
+export function analyzeServerErrorResponse(err: unknown) {
   return {
     success: false,
     error: getErrorMessage(err),

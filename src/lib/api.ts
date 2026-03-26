@@ -33,6 +33,39 @@ const REQUEST_TIMEOUTS_MS: Record<string, number> = {
   runEof: 6_000
 } as const;
 
+function isLocalHostname(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::1' ||
+    hostname.endsWith('.localhost')
+  );
+}
+
+function assertSecureApiBase(action: string): void {
+  if (!API_BASE || typeof window === 'undefined') {
+    return;
+  }
+
+  let apiUrl: URL;
+  try {
+    apiUrl = new URL(API_BASE, window.location.origin);
+  } catch {
+    return;
+  }
+
+  if (apiUrl.protocol !== 'http:' || isLocalHostname(apiUrl.hostname)) {
+    return;
+  }
+
+  if (window.location.protocol === 'https:' || import.meta.env.PROD) {
+    throw new Error(
+      `${action} failed: insecure API base "${apiUrl.origin}" is not allowed here. Configure the backend over HTTPS.`
+    );
+  }
+}
+
 function backendUnavailableMessage(action: string, error: unknown): Error {
   const offlineHint =
     typeof navigator !== 'undefined' && navigator.onLine === false
@@ -59,6 +92,7 @@ async function fetchWithTimeout(
   action: string,
   timeoutMs: number
 ): Promise<Response> {
+  assertSecureApiBase(action);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 

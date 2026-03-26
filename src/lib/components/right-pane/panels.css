@@ -271,9 +271,12 @@
 
 .trace-runtime-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: min(100%, 260px);
 }
 
 .trace-runtime-status {
@@ -285,6 +288,7 @@
   font-weight: 700;
   padding: 4px 8px;
   white-space: nowrap;
+  align-self: flex-start;
 }
 
 .trace-runtime-status.ready {
@@ -310,14 +314,153 @@
   white-space: nowrap;
 }
 
+.trace-runtime-run-primary {
+  gap: 8px;
+  width: 100%;
+  padding: 13px 18px;
+  border-radius: 12px;
+  border-color: color-mix(in srgb, var(--od-blue) 46%, transparent);
+  background: color-mix(in srgb, var(--od-blue) 78%, #0f1520);
+  color: #10161f;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 22px rgba(14, 24, 38, 0.22);
+}
+
 .trace-runtime-run:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--od-blue) 46%, transparent);
   background: color-mix(in srgb, var(--od-blue) 20%, var(--od-bg-deep));
 }
 
+.trace-runtime-run-primary:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--od-blue) 60%, transparent);
+  background: color-mix(in srgb, var(--od-blue) 88%, #0f1520);
+}
+
 .trace-runtime-run:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.trace-playback-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--od-border) 72%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--od-bg-main) 92%, transparent) 0%,
+      color-mix(in srgb, var(--od-bg-deep) 88%, transparent) 100%
+    );
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.trace-playback-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.trace-playback-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.trace-playback-title {
+  color: var(--od-text-bright);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.trace-playback-meta {
+  color: var(--od-text-dim);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.trace-complete-pill {
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--od-green) 32%, transparent);
+  background: color-mix(in srgb, var(--od-green) 12%, transparent);
+  color: var(--od-green);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.trace-playback-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.trace-playback-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+}
+
+.trace-playback-btn,
+.trace-playback-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--od-border) 85%, transparent);
+  background: color-mix(in srgb, var(--od-bg-hover) 82%, var(--od-bg-deep));
+  color: var(--od-text-bright);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.trace-playback-btn:hover:not(:disabled),
+.trace-playback-reset:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--od-blue) 52%, var(--od-border));
+  background: color-mix(in srgb, var(--od-blue) 12%, var(--od-bg-hover));
+}
+
+.trace-playback-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.trace-playback-primary {
+  border-color: color-mix(in srgb, var(--od-green) 28%, var(--od-border));
+  background: color-mix(in srgb, var(--od-green) 14%, var(--od-bg-hover));
+  color: var(--od-green);
+}
+
+.trace-playback-icon {
+  min-width: 40px;
+  padding-inline: 10px;
+}
+
+.trace-playback-reset {
+  border-color: color-mix(in srgb, var(--od-orange) 28%, var(--od-border));
+  background: color-mix(in srgb, var(--od-orange) 10%, var(--od-bg-deep));
+  color: var(--od-orange);
 }
 
 .trace-runtime-output {
@@ -1238,6 +1381,19 @@
   .trace-runtime-header,
   .analysis-header {
     align-items: flex-start;
+  }
+
+  .trace-playback-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .trace-playback-buttons {
+    width: 100%;
+  }
+
+  .trace-playback-reset {
+    width: 100%;
   }
 }
 

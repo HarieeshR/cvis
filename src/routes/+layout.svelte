@@ -428,7 +428,7 @@
     </div>
   {/if}
   <div class="main">
-    <EditorPane {isTracing} on:trace={handleTrace} />
+    <EditorPane />
     <RightPane
       on:trace={handleTrace}
       traceSteps={$traceSteps}

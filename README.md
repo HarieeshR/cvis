@@ -247,6 +247,18 @@ FRONTEND_PORT=3000
 FRONTEND_HOST=0.0.0.0
 BACKEND_PORT=3001
 BACKEND_HOST=127.0.0.1
+
+# secure transport
+TRUST_PROXY=true
+REQUIRE_HTTPS=true
+
+# direct TLS on the backend (optional if you terminate TLS at a reverse proxy)
+TLS_KEY_FILE=/etc/ssl/private/cvis.key
+TLS_CERT_FILE=/etc/ssl/certs/cvis.crt
+# optional
+TLS_CA_FILE=/etc/ssl/certs/ca-chain.crt
+TLS_PASSPHRASE=change-me
+HTTPS_PUBLIC_ORIGIN=https://api.example.com
 ```
 
 **Recommended production shape**
@@ -255,6 +267,7 @@ BACKEND_HOST=127.0.0.1
 - place both behind a reverse proxy
 - proxy `/api` to the backend if you want same-origin browser requests
 - otherwise set `PUBLIC_API_BASE` so the frontend calls the backend directly
+- use HTTPS for both the frontend and backend in production; if TLS terminates at the proxy, set `TRUST_PROXY=true` and `REQUIRE_HTTPS=true` on the backend
 
 **Smoke test the production build locally**
 
@@ -291,9 +304,9 @@ cvis/
 │   └── routes/               # SvelteKit routes
 ├── server/                   # Express backend
 │   ├── index.js              # Server bootstrap/startup
-│   ├── app.js                # Express app assembly
+│   ├── app.ts                # Express app assembly
 │   ├── config/               # Shared limits/config constants
-│   ├── routes/index.js       # Health + API route handlers
+│   ├── routes/index.ts       # Health + API route handlers
 │   ├── lib/                  # Compiler/execution/interpreter services
 │   └── package.json          # Backend dependencies
 ├── docker-compose.yml        # Docker Compose configuration

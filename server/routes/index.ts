@@ -1,3 +1,4 @@
+import type { AppLike } from '../lib/http/http-types.ts';
 import {
   analyzeIntentHandler,
   compileHandler,
@@ -9,9 +10,9 @@ import {
   runStartHandler,
   runStopHandler,
   traceHandler
-} from '../lib/http/route-handlers.js';
+} from '../lib/http/route-handlers.ts';
 
-export function registerRoutes(app) {
+export function registerRoutes(app: AppLike): void {
   app.get('/health', healthHandler);
   app.post('/api/compile', compileHandler);
   app.post('/api/run', runHandler);

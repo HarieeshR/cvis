@@ -1,13 +1,5 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import {
-    ChevronLeft,
-    ChevronRight,
-    Pause,
-    Play,
-    SkipBack,
-    SkipForward
-  } from 'lucide-svelte';
   import './visualizer/visualizer.css';
   import RawStateInspector from './RawStateInspector.svelte';
   import ArraysView from '$lib/components/visualizer/ArraysView.svelte';
@@ -27,10 +19,12 @@
   $: previousTraceStep =
     $currentStepIndex > 0 ? $traceSteps[$currentStepIndex - 1] ?? null : null;
   $: renderModel = buildVisualizerRenderModel(traceStep, previousTraceStep, $editorCode);
-  $: totalSteps = $traceSteps.length;
-  $: isTraceComplete = totalSteps > 0 && $currentStepIndex >= totalSteps - 1;
 
   let playInterval: number | null = null;
+  let scrollRef: HTMLDivElement | null = null;
+  let smoothScrollFrame: number | null = null;
+  let smoothScrollTarget = 0;
+  let smoothScrollVelocity = 0;
 
   function confidenceClass(confidence: number): string {
     if (confidence >= 0.8) return 'confidence-high';
@@ -38,40 +32,58 @@
     return 'confidence-low';
   }
 
-  function goToTraceStart() {
-    isPlaying.set(false);
-    currentStepIndex.set(0);
+  function clampScrollTarget(next: number): number {
+    if (!scrollRef) return 0;
+    const maxScroll = Math.max(0, scrollRef.scrollHeight - scrollRef.clientHeight);
+    return Math.max(0, Math.min(maxScroll, next));
   }
 
-  function goToTraceEnd() {
-    if (totalSteps === 0) return;
-    isPlaying.set(false);
-    currentStepIndex.set(totalSteps - 1);
+  function stopSmoothScroll() {
+    if (smoothScrollFrame !== null) {
+      cancelAnimationFrame(smoothScrollFrame);
+      smoothScrollFrame = null;
+    }
   }
 
-  function stepTrace(delta: number) {
-    if (totalSteps === 0) return;
-    isPlaying.set(false);
-    currentStepIndex.update((index) => Math.max(0, Math.min(totalSteps - 1, index + delta)));
-  }
-
-  function toggleTracePlayback() {
-    if (totalSteps === 0) return;
-
-    if (!$isPlaying && $currentStepIndex >= totalSteps - 1) {
-      currentStepIndex.set(0);
+  function animateSmoothScroll() {
+    if (!scrollRef) {
+      stopSmoothScroll();
+      return;
     }
 
-    isPlaying.update((playing) => !playing);
+    const current = scrollRef.scrollTop;
+    const delta = smoothScrollTarget - current;
+    smoothScrollVelocity = smoothScrollVelocity * 0.72 + delta * 0.16;
+
+    if (Math.abs(delta) < 0.5 && Math.abs(smoothScrollVelocity) < 0.5) {
+      scrollRef.scrollTop = smoothScrollTarget;
+      smoothScrollVelocity = 0;
+      stopSmoothScroll();
+      return;
+    }
+
+    scrollRef.scrollTop = clampScrollTarget(current + smoothScrollVelocity);
+    smoothScrollFrame = requestAnimationFrame(animateSmoothScroll);
   }
 
-  function returnToEditor() {
-    isPlaying.set(false);
-    currentStepIndex.set(0);
-    traceSteps.set([]);
+  function handleVizWheel(event: WheelEvent) {
+    if (!scrollRef || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+      return;
+    }
+
+    event.preventDefault();
+    const baseline = smoothScrollFrame === null ? scrollRef.scrollTop : smoothScrollTarget;
+    const dampedDelta = event.deltaY * 0.72;
+    smoothScrollTarget = clampScrollTarget(baseline + dampedDelta);
+
+    if (smoothScrollFrame === null) {
+      smoothScrollVelocity = 0;
+      smoothScrollFrame = requestAnimationFrame(animateSmoothScroll);
+    }
   }
 
   $: {
+    const totalSteps = $traceSteps.length;
     if ($isPlaying && totalSteps > 0 && typeof window !== 'undefined') {
       if (playInterval !== null) {
         clearInterval(playInterval);
@@ -93,6 +105,7 @@
     if (playInterval !== null) {
       clearInterval(playInterval);
     }
+    stopSmoothScroll();
     isPlaying.set(false);
   });
 </script>
@@ -114,65 +127,13 @@
     </div>
   </div>
 
-  <div class="viz-scroll">
+  <div bind:this={scrollRef} class="viz-scroll" on:wheel={handleVizWheel}>
     {#if !traceStep}
       <div class="empty-state">
         <div class="empty-title">Ready to visualize</div>
         <div class="empty-copy">Run a trace to inspect program flow, variables, and data structure behavior.</div>
       </div>
     {:else}
-      <section class="trace-nav-card">
-        <div class="trace-nav-head">
-          <div class="trace-nav-copy">
-            <span class="trace-nav-title">Trace Controls</span>
-            <span class="trace-nav-meta">step {$currentStepIndex + 1} / {totalSteps}</span>
-          </div>
-          {#if isTraceComplete}
-            <span class="trace-complete-pill">Trace complete</span>
-          {/if}
-        </div>
-        <div class="trace-nav-actions">
-          <div class="trace-nav-buttons">
-            <button type="button" class="trace-btn icon-btn" on:click={goToTraceStart} title="Go to start">
-              <SkipBack size={13} />
-            </button>
-            <button
-              type="button"
-              class="trace-btn"
-              on:click={() => stepTrace(-1)}
-              disabled={$currentStepIndex === 0}
-            >
-              <ChevronLeft size={14} />
-              <span>Prev</span>
-            </button>
-            <button type="button" class="trace-btn trace-play-btn" on:click={toggleTracePlayback}>
-              {#if $isPlaying}
-                <Pause size={13} />
-                <span>Pause</span>
-              {:else}
-                <Play size={13} />
-                <span>{isTraceComplete ? 'Replay' : 'Play'}</span>
-              {/if}
-            </button>
-            <button
-              type="button"
-              class="trace-btn"
-              on:click={() => stepTrace(1)}
-              disabled={$currentStepIndex >= totalSteps - 1}
-            >
-              <span>Next</span>
-              <ChevronRight size={14} />
-            </button>
-            <button type="button" class="trace-btn icon-btn" on:click={goToTraceEnd} title="Go to end">
-              <SkipForward size={13} />
-            </button>
-          </div>
-          <button type="button" class="trace-exit-btn" on:click={returnToEditor}>
-            Back to Editor
-          </button>
-        </div>
-      </section>
-
       {#if renderModel.flowDescriptor}
         <section class="viz-section">
           <div class="flow-card" style="--flow-color: {renderModel.flowDescriptor.color}">
@@ -311,105 +272,6 @@
     gap: 10px;
   }
 
-  .trace-nav-card {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 12px 14px;
-    border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  }
-
-  .trace-nav-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .trace-nav-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .trace-nav-title {
-    color: var(--text-bright);
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .trace-nav-meta {
-    color: color-mix(in srgb, var(--text-mid) 80%, var(--text-dim));
-    font-size: 10px;
-  }
-
-  .trace-complete-pill {
-    padding: 4px 9px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
-    background: color-mix(in srgb, var(--green) 12%, transparent);
-    color: var(--green);
-    font-size: 10px;
-    font-weight: 700;
-    white-space: nowrap;
-  }
-
-  .trace-nav-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .trace-nav-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .trace-btn,
-  .trace-exit-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-    background: color-mix(in srgb, var(--bg-raised) 84%, var(--bg-deep));
-    color: var(--text-bright);
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
-  }
-
-  .trace-btn:hover:not(:disabled),
-  .trace-exit-btn:hover {
-    border-color: color-mix(in srgb, var(--blue) 52%, var(--border));
-    background: color-mix(in srgb, var(--blue) 12%, var(--bg-raised));
-  }
-
-  .trace-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .trace-play-btn {
-    border-color: color-mix(in srgb, var(--green) 28%, var(--border));
-    background: color-mix(in srgb, var(--green) 12%, var(--bg-raised));
-    color: var(--green);
-  }
-
-  .icon-btn {
-    min-width: 36px;
-    padding-inline: 8px;
-  }
-
   .flow-card {
     display: flex;
     align-items: flex-start;
@@ -503,6 +365,8 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
     background:
       linear-gradient(
         180deg,
