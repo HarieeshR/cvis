@@ -109,6 +109,7 @@ export interface TraceRuntimeSnapshot {
   globals: Record<string, any>;
   frames: StackFrame[];
   flatMemory: Record<string, any>;
+  heap?: Record<string, any>;
 }
 
 export interface TraceStep {

@@ -32,6 +32,15 @@ export interface VisualizerFrame {
   isGlobal: boolean;
 }
 
+export interface VisualizerPointerRef {
+  label: string;
+  targetKey: string;
+  targetLabel: string;
+  owner: string;
+  ownerType: 'global' | 'frame' | 'struct';
+  fieldName: string;
+}
+
 export interface VisualizerMemoryEntry {
   key: string;
   value: unknown;
@@ -41,6 +50,8 @@ export interface VisualizerLinkedListNode {
   key: string;
   label: string;
   nextKey: string | null;
+  addressLabel: string;
+  fields: VisualizerStructField[];
 }
 
 export interface VisualizerLinkedList {
@@ -58,6 +69,24 @@ export interface VisualizerTreeNode {
 export interface VisualizerTree {
   id: string;
   levels: Array<Array<VisualizerTreeNode | null>>;
+}
+
+export interface VisualizerStructField {
+  name: string;
+  value: unknown;
+  displayValue: string;
+  isPointer: boolean;
+  targetKey: string | null;
+}
+
+export interface VisualizerStructBlock {
+  key: string;
+  title: string;
+  addressLabel: string;
+  origin: 'heap' | 'inline';
+  scopeLabel: string;
+  isMalloc: boolean;
+  fields: VisualizerStructField[];
 }
 
 export interface VisualizerLinearStructure {
@@ -88,6 +117,8 @@ export interface NormalizedTraceState {
   linkedNodes: VisualizerLinkedNode[];
   linkedLists: VisualizerLinkedList[];
   trees: VisualizerTree[];
+  structBlocks: VisualizerStructBlock[];
+  pointerRefs: VisualizerPointerRef[];
   stack: VisualizerLinearStructure;
   queue: VisualizerLinearStructure;
   graphs: VisualizerGraph[];
@@ -95,6 +126,7 @@ export interface NormalizedTraceState {
   stackFrames: VisualizerFrame[];
   registers: Record<string, number>;
   memoryEntries: VisualizerMemoryEntry[];
+  heapEntries: VisualizerMemoryEntry[];
   detectedMode: VisualizerDetectedMode;
   hasArrayData: boolean;
   hasLinkedListData: boolean;
@@ -110,6 +142,7 @@ interface TraceRuntimeContract {
   memory: Record<string, unknown>;
   globalFrame: VisualizerFrame | null;
   stackFrames: VisualizerFrame[];
+  heap: Record<string, unknown>;
 }
 
 function toObjectRecord(value: unknown): Record<string, unknown> {
@@ -273,7 +306,8 @@ function normalizeRuntimeContract(
   return {
     memory,
     globalFrame,
-    stackFrames
+    stackFrames,
+    heap: toObjectRecord(runtime.heap)
   };
 }
 
@@ -290,8 +324,179 @@ function resolveTraceRuntimeContract(traceStep: TraceStep | null): TraceRuntimeC
   return {
     memory: toObjectRecord(traceStep?.memory),
     globalFrame,
-    stackFrames
+    stackFrames,
+    heap: {}
   };
+}
+
+function normalizeAddressKey(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim().replace(/^@/, '');
+  }
+
+  if (typeof value === 'object') {
+    const record = asRecord(value);
+    if (!record) return null;
+    if ('addr' in record) return normalizeAddressKey(record.addr);
+    if ('id' in record) return normalizeAddressKey(record.id);
+  }
+
+  return null;
+}
+
+function formatAddressLabel(key: string): string {
+  return `@${key}`;
+}
+
+function pointerTargetKey(value: unknown, heap: Record<string, unknown>): string | null {
+  const key = normalizeAddressKey(value);
+  if (!key) return null;
+  return key in heap ? key : null;
+}
+
+function isRenderableStructRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function buildStructField(
+  fieldName: string,
+  value: unknown,
+  heap: Record<string, unknown>
+): VisualizerStructField {
+  const targetKey = pointerTargetKey(value, heap);
+  return {
+    name: fieldName,
+    value,
+    displayValue: targetKey ? formatAddressLabel(targetKey) : toDisplayLabel(value),
+    isPointer: Boolean(targetKey),
+    targetKey
+  };
+}
+
+function collectInlineStructBlocks(
+  globalFrame: VisualizerFrame | null,
+  stackFrames: VisualizerFrame[],
+  heap: Record<string, unknown>
+): VisualizerStructBlock[] {
+  const blocks: VisualizerStructBlock[] = [];
+
+  const addStructBlock = (
+    scopeLabel: string,
+    ownerName: string,
+    value: unknown,
+    scope: 'global' | 'frame'
+  ) => {
+    if (!isRenderableStructRecord(value)) return;
+    if (Object.keys(value).length === 0) return;
+
+    blocks.push({
+      key: `${scope}:${scopeLabel}.${ownerName}`,
+      title: ownerName,
+      addressLabel: scope === 'global' ? 'global' : scopeLabel,
+      origin: 'inline',
+      scopeLabel,
+      isMalloc: false,
+      fields: Object.entries(value).map(([fieldName, fieldValue]) =>
+        buildStructField(fieldName, fieldValue, heap)
+      )
+    });
+  };
+
+  for (const [name, value] of Object.entries(globalFrame?.locals ?? {})) {
+    addStructBlock('Global Scope', name, value, 'global');
+  }
+
+  for (const frame of stackFrames) {
+    for (const [name, value] of Object.entries(frame.locals)) {
+      addStructBlock(`${frame.name}()`, name, value, 'frame');
+    }
+  }
+
+  return blocks;
+}
+
+function buildHeapStructBlocks(heap: Record<string, unknown>): VisualizerStructBlock[] {
+  return Object.entries(heap)
+    .flatMap(([key, value]) => {
+      if (!isRenderableStructRecord(value)) {
+        return [];
+      }
+
+      return [{
+        key,
+        title: 'malloc block',
+        addressLabel: formatAddressLabel(key),
+        origin: 'heap' as const,
+        scopeLabel: 'Heap',
+        isMalloc: true,
+        fields: Object.entries(value).map(([fieldName, fieldValue]) =>
+          buildStructField(fieldName, fieldValue, heap)
+        )
+      }];
+    })
+    .sort((left, right) => left.addressLabel.localeCompare(right.addressLabel, undefined, { numeric: true }));
+}
+
+function buildPointerRefs(
+  globalFrame: VisualizerFrame | null,
+  stackFrames: VisualizerFrame[],
+  structBlocks: VisualizerStructBlock[],
+  heap: Record<string, unknown>
+): VisualizerPointerRef[] {
+  const refs: VisualizerPointerRef[] = [];
+  const heapLabels = new Map(structBlocks.map((block) => [block.key, block.addressLabel]));
+
+  const pushRef = (
+    owner: string,
+    ownerType: 'global' | 'frame' | 'struct',
+    fieldName: string,
+    value: unknown
+  ) => {
+    const targetKey = pointerTargetKey(value, heap);
+    if (!targetKey) return;
+
+    refs.push({
+      label: `${owner}.${fieldName} -> ${formatAddressLabel(targetKey)}`,
+      targetKey,
+      targetLabel: heapLabels.get(targetKey) ?? formatAddressLabel(targetKey),
+      owner,
+      ownerType,
+      fieldName
+    });
+  };
+
+  for (const [name, value] of Object.entries(globalFrame?.locals ?? {})) {
+    pushRef('global', 'global', name, value);
+  }
+
+  for (const frame of stackFrames) {
+    for (const [name, value] of Object.entries(frame.locals)) {
+      pushRef(frame.name, 'frame', name, value);
+    }
+  }
+
+  for (const block of structBlocks) {
+    for (const field of block.fields) {
+      if (field.isPointer) {
+        refs.push({
+          label: `${block.addressLabel}.${field.name} -> ${field.displayValue}`,
+          targetKey: field.targetKey ?? '',
+          targetLabel: field.displayValue,
+          owner: block.addressLabel,
+          ownerType: 'struct',
+          fieldName: field.name
+        });
+      }
+    }
+  }
+
+  return refs;
 }
 
 function toNextLabel(value: unknown): string | null {
@@ -364,10 +569,23 @@ function buildLinkedLists(nodes: VisualizerLinkedNode[]): VisualizerLinkedList[]
     const chain: VisualizerLinkedListNode[] = [];
     let current: VisualizerLinkedNode | undefined = head;
     while (current && !consumed.has(current.id)) {
+      const currentNext = current.next;
+      const currentNextKey =
+        currentNext && nodeByKey.has(currentNext) ? nodeByKey.get(currentNext)?.id ?? null : null;
+      const currentRaw = asRecord(current.raw) ?? {};
+
       chain.push({
         key: current.id,
         label: current.label,
-        nextKey: current.next && nodeByKey.has(current.next) ? nodeByKey.get(current.next)?.id ?? null : null
+        nextKey: currentNextKey,
+        addressLabel: formatAddressLabel(current.id),
+        fields: Object.entries(currentRaw).map(([fieldName, fieldValue]) => ({
+          name: fieldName,
+          value: fieldValue,
+          displayValue: toDisplayLabel(fieldValue),
+          isPointer: fieldName === 'next' && Boolean(currentNextKey),
+          targetKey: fieldName === 'next' ? currentNextKey : null
+        }))
       });
       consumed.add(current.id);
 
@@ -389,7 +607,21 @@ function buildLinkedLists(nodes: VisualizerLinkedNode[]): VisualizerLinkedList[]
     if (consumed.has(node.id)) continue;
     lists.push({
       id: `list-${lists.length + 1}`,
-      nodes: [{ key: node.id, label: node.label, nextKey: null }]
+      nodes: [
+        {
+          key: node.id,
+          label: node.label,
+          nextKey: null,
+          addressLabel: formatAddressLabel(node.id),
+          fields: Object.entries(asRecord(node.raw) ?? {}).map(([fieldName, fieldValue]) => ({
+            name: fieldName,
+            value: fieldValue,
+            displayValue: toDisplayLabel(fieldValue),
+            isPointer: false,
+            targetKey: null
+          }))
+        }
+      ]
     });
   }
 
@@ -790,12 +1022,18 @@ function pickFallbackReason(
 }
 
 export function normalizeTraceStep(traceStep: TraceStep | null): NormalizedTraceState {
-  const { memory, globalFrame, stackFrames } = resolveTraceRuntimeContract(traceStep);
+  const { memory, globalFrame, stackFrames, heap } = resolveTraceRuntimeContract(traceStep);
   const arrays = parseArrays(memory);
   const linkedNodes = parseLinkedNodes(memory);
   const memoryEntries = normalizeMemoryEntries(memory);
+  const heapEntries = normalizeMemoryEntries(heap);
   const linkedLists = buildLinkedLists(linkedNodes);
   const trees = buildTrees(memoryEntries);
+  const structBlocks = [
+    ...buildHeapStructBlocks(heap),
+    ...collectInlineStructBlocks(globalFrame, stackFrames, heap)
+  ];
+  const pointerRefs = buildPointerRefs(globalFrame, stackFrames, structBlocks, heap);
   const stack = buildStackContract(globalFrame, stackFrames, memoryEntries);
   const queue = buildQueueContract(globalFrame, stackFrames, memoryEntries);
   const graphs = buildGraphs(memoryEntries);
@@ -823,6 +1061,8 @@ export function normalizeTraceStep(traceStep: TraceStep | null): NormalizedTrace
     linkedNodes,
     linkedLists,
     trees,
+    structBlocks,
+    pointerRefs,
     stack,
     queue,
     graphs,
@@ -830,6 +1070,7 @@ export function normalizeTraceStep(traceStep: TraceStep | null): NormalizedTrace
     stackFrames,
     registers,
     memoryEntries,
+    heapEntries,
     detectedMode: pickDetectedMode(
       hasArrayData,
       hasLinkedListData,

@@ -38,7 +38,32 @@ async function main() {
   log(`✓ Health: ${JSON.stringify(health.body)}`);
   log('');
 
-  log('Test 2: Compile valid C code');
+  log('Test 2: Reject malformed JSON body');
+  const malformedJson = await fetch(`${API_BASE}/api/compile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{"code":'
+  });
+  const malformedBody = await malformedJson.json();
+  log(JSON.stringify(malformedBody, null, 2));
+  assert(malformedJson.status === 400, 'Malformed JSON should return HTTP 400');
+  assert(malformedBody?.error === 'Invalid JSON body', 'Malformed JSON should return a clear parse error');
+  log('✓ Malformed JSON is rejected cleanly');
+  log('');
+
+  log('Test 3: Reject non-object JSON body');
+  const invalidBody = await getJson(`${API_BASE}/api/compile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(['not-an-object'])
+  });
+  log(JSON.stringify(invalidBody.body, null, 2));
+  assert(invalidBody.res.status === 400, 'Non-object JSON body should return HTTP 400');
+  assert(invalidBody.body?.errors?.[0] === 'Request body must be a JSON object', 'Non-object JSON should be rejected');
+  log('✓ Non-object JSON body is rejected cleanly');
+  log('');
+
+  log('Test 4: Compile valid C code');
   const compile = await getJson(`${API_BASE}/api/compile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -52,7 +77,7 @@ async function main() {
   log('✓ Compilation successful');
   log('');
 
-  log('Test 3: Run compiled binary');
+  log('Test 5: Run compiled binary');
   const run = await getJson(`${API_BASE}/api/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -65,7 +90,7 @@ async function main() {
   log('✓ Execution successful');
   log('');
 
-  log('Test 4: Compile invalid C code (should fail)');
+  log('Test 6: Compile invalid C code (should fail)');
   const invalid = await getJson(`${API_BASE}/api/compile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -78,7 +103,7 @@ async function main() {
   log('✓ Compilation correctly failed');
   log('');
 
-  log('Test 5: Trace execution');
+  log('Test 7: Trace execution');
   const trace = await getJson(`${API_BASE}/api/trace`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -99,7 +124,82 @@ async function main() {
   log('✓ Structured trace runtime snapshot present');
   log('');
 
-  log('Test 6: AI intent analysis');
+  log('Test 8: Trace stdin happy path');
+  const traceWithInput = await getJson(`${API_BASE}/api/trace`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code: 'int main() {\n  int x = 0;\n  scanf("%d", &x);\n  return x;\n}\n',
+      input: '42\n',
+      breakpoints: [4]
+    })
+  });
+  log(JSON.stringify(traceWithInput.body, null, 2));
+  assert(traceWithInput.body?.success === true, 'Trace with stdin should succeed');
+  const scanfStep = traceWithInput.body?.steps?.[0];
+  const scanfValue = scanfStep?.runtime?.frames?.[0]?.locals?.x;
+  assert(scanfValue === 42, 'Trace stdin should populate the traced variable');
+  log('✓ Trace stdin is applied to runtime state');
+  log('');
+
+  log('Test 9: Reject invalid trace input type');
+  const invalidTraceInput = await getJson(`${API_BASE}/api/trace`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code: 'int main() { return 0; }\n',
+      input: 123
+    })
+  });
+  log(JSON.stringify(invalidTraceInput.body, null, 2));
+  assert(invalidTraceInput.res.status === 400, 'Invalid trace input type should return HTTP 400');
+  assert(
+    invalidTraceInput.body?.errors?.[0] === '"input" must be a string when provided',
+    'Invalid trace input type should return a clear validation message'
+  );
+  log('✓ Invalid trace input is rejected cleanly');
+  log('');
+
+  log('Test 10: Trace rejects unsupported syntax cleanly');
+  const unsupportedTrace = await getJson(`${API_BASE}/api/trace`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code: '#include <stdio.h>\nint main() {\n  int x = 2;\n  switch (x) {\n    case 2: return 0;\n    default: return 1;\n  }\n}\n'
+    })
+  });
+  log(JSON.stringify(unsupportedTrace.body, null, 2));
+  assert(unsupportedTrace.body?.success === false, 'Unsupported trace syntax should fail cleanly');
+  assert(
+    Array.isArray(unsupportedTrace.body?.errors) && unsupportedTrace.body.errors[0]?.includes('does not support switch/case'),
+    'Unsupported trace syntax should return a clear error'
+  );
+  log('✓ Unsupported trace syntax returns a controlled error');
+  log('');
+
+  log('Test 11: Trace stops runaway loops cleanly');
+  const runawayTrace = await getJson(`${API_BASE}/api/trace`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      code: 'int main() {\n  while (1) {\n  }\n  return 0;\n}\n'
+    })
+  });
+  log(JSON.stringify({
+    success: runawayTrace.body?.success,
+    totalSteps: runawayTrace.body?.totalSteps,
+    errors: runawayTrace.body?.errors,
+    phase: runawayTrace.body?.phase
+  }, null, 2));
+  assert(runawayTrace.body?.success === false, 'Runaway trace should fail cleanly');
+  assert(
+    Array.isArray(runawayTrace.body?.errors) && runawayTrace.body.errors[0]?.includes('maximum step limit'),
+    'Runaway trace should explain the step limit'
+  );
+  log('✓ Runaway loops return a controlled step-limit error');
+  log('');
+
+  log('Test 12: AI intent analysis');
   const analyze = await getJson(`${API_BASE}/api/analyze/intent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -115,7 +215,7 @@ async function main() {
   log('✓ AI intent analysis returned structured output');
   log('');
 
-  log('Test 7: Reject unsafe binary path');
+  log('Test 13: Reject unsafe binary path');
   const unsafe = await getJson(`${API_BASE}/api/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

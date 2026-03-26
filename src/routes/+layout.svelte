@@ -6,7 +6,7 @@
   import HeaderBar from '$lib/components/HeaderBar.svelte';
   import OnboardingModal from '$lib/components/OnboardingModal.svelte';
   import RightPane from '$lib/components/RightPane.svelte';
-  import { runBinaryAction, runCompileAction, runTraceAction } from '$lib/layout/run-actions';
+  import { runBinaryAction, runCompileAction, runTraceAction } from '$lib/runtime/actions';
   import {
     lastBinaryPath,
     lastRunInputTranscript,

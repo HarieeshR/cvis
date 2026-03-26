@@ -8,110 +8,34 @@
     SkipBack,
     SkipForward
   } from 'lucide-svelte';
+  import './visualizer/visualizer.css';
   import RawStateInspector from './RawStateInspector.svelte';
+  import ArraysView from '$lib/components/visualizer/ArraysView.svelte';
+  import FrameStackView from '$lib/components/visualizer/FrameStackView.svelte';
+  import GlobalsView from '$lib/components/visualizer/GlobalsView.svelte';
+  import GraphView from '$lib/components/visualizer/GraphView.svelte';
+  import LinkedListView from '$lib/components/visualizer/LinkedListView.svelte';
+  import LinearStructureView from '$lib/components/visualizer/LinearStructureView.svelte';
+  import PointerMapView from '$lib/components/visualizer/PointerMapView.svelte';
+  import StructBlocksView from '$lib/components/visualizer/StructBlocksView.svelte';
+  import TreeView from '$lib/components/visualizer/TreeView.svelte';
   import { currentStepIndex, editorCode, isPlaying, runSessionId, traceSteps } from '$lib/stores';
   import type { TraceStep } from '$lib/types';
-  import type { VisualizerFrame } from '$lib/visualizer/trace-normalization';
-  import { normalizeTraceStep } from '$lib/visualizer/trace-normalization';
-  import { predictProgramIntent } from '$lib/visualizer/program-intent';
+  import { buildVisualizerRenderModel } from '$lib/visualizer/render-model';
 
   export let traceStep: TraceStep | null = null;
-
-  interface ArrayView {
-    name: string;
-    values: Array<{ idx: number; value: unknown }>;
-  }
-
-  $: normalizedTrace = normalizeTraceStep(traceStep);
   $: previousTraceStep =
     $currentStepIndex > 0 ? $traceSteps[$currentStepIndex - 1] ?? null : null;
-  $: previousNormalizedTrace = normalizeTraceStep(previousTraceStep);
-  $: intentPrediction = predictProgramIntent($editorCode);
-
-  $: stackFrames = normalizedTrace.stackFrames;
-  $: previousStackFrames = previousNormalizedTrace.stackFrames;
-  $: globalFrame = normalizedTrace.globalFrame;
-  $: previousGlobalFrame = previousNormalizedTrace.globalFrame;
-  $: memoryEntries = normalizedTrace.memoryEntries;
-  $: arrays = buildArrayViews(normalizedTrace.arrays);
-  $: linkedLists = normalizedTrace.linkedLists;
-  $: trees = normalizedTrace.trees;
-  $: stackItems = normalizedTrace.stack.values;
-  $: queueItems = normalizedTrace.queue.values;
-  $: graphs = normalizedTrace.graphs;
+  $: renderModel = buildVisualizerRenderModel(traceStep, previousTraceStep, $editorCode);
   $: totalSteps = $traceSteps.length;
-  $: hasStructureViews =
-    arrays.length > 0 ||
-    linkedLists.length > 0 ||
-    trees.length > 0 ||
-    stackItems.length > 0 ||
-    queueItems.length > 0 ||
-    graphs.length > 0;
-  $: hasRenderableSections =
-    stackFrames.length > 0 ||
-    Boolean(globalFrame && Object.keys(globalFrame.locals).length > 0) ||
-    arrays.length > 0 ||
-    linkedLists.length > 0 ||
-    trees.length > 0 ||
-    stackItems.length > 0 ||
-    queueItems.length > 0 ||
-    graphs.length > 0;
-  $: isPartialSnapshot = Boolean(traceStep) && !hasStructureViews && hasRenderableSections;
   $: isTraceComplete = totalSteps > 0 && $currentStepIndex >= totalSteps - 1;
-  $: flowDescriptor = describeTraceStep(traceStep?.description);
 
   let playInterval: number | null = null;
-
-  function buildArrayViews(
-    source: Array<{ name: string; cells: Array<{ idx: number; value: unknown }> }>
-  ): ArrayView[] {
-    return source.map((entry) => ({
-      name: entry.name,
-      values: entry.cells.map((cell) => ({ idx: cell.idx, value: cell.value }))
-    }));
-  }
-
-  function formatValue(value: unknown): string {
-    if (value === null) return 'null';
-    if (value === undefined) return 'undefined';
-    if (typeof value === 'string') return value;
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-    if (Array.isArray(value)) return `[${value.length}]`;
-
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-
-  function formatTechniqueLabel(tag: string): string {
-    return tag
-      .split('-')
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
-  }
 
   function confidenceClass(confidence: number): string {
     if (confidence >= 0.8) return 'confidence-high';
     if (confidence >= 0.6) return 'confidence-medium';
     return 'confidence-low';
-  }
-
-  function valuesEqual(left: unknown, right: unknown): boolean {
-    try {
-      return JSON.stringify(left) === JSON.stringify(right);
-    } catch {
-      return left === right;
-    }
-  }
-
-  function previousFrameFor(index: number): VisualizerFrame | null {
-    return previousStackFrames[index] ?? null;
-  }
-
-  function previousGlobalValue(key: string): unknown {
-    return previousGlobalFrame?.locals[key];
   }
 
   function goToTraceStart() {
@@ -145,44 +69,6 @@
     isPlaying.set(false);
     currentStepIndex.set(0);
     traceSteps.set([]);
-  }
-
-  function describeTraceStep(
-    description: string | undefined
-  ): { label: string; color: string; text: string } | null {
-    if (!description) return null;
-
-    const normalized = description.toLowerCase();
-
-    if (/\bprintf\b|\bputs\b|\bputchar\b|output/.test(normalized)) {
-      return { label: 'Output', color: 'var(--green)', text: description };
-    }
-
-    if (/return/.test(normalized)) {
-      return { label: 'Return', color: 'var(--red)', text: description };
-    }
-
-    if (/call /.test(normalized)) {
-      return { label: 'Call', color: 'var(--orange)', text: description };
-    }
-
-    if (/\bfor\b|\bwhile\b|\bloop\b/.test(normalized)) {
-      return { label: 'Loop', color: 'var(--purple)', text: description };
-    }
-
-    if (/\bif\b|\bcondition\b|\bswitch\b/.test(normalized)) {
-      return { label: 'Branch', color: 'var(--cyan)', text: description };
-    }
-
-    if (/\bdeclare\b|declaration/.test(normalized)) {
-      return { label: 'Declare', color: 'var(--purple)', text: description };
-    }
-
-    if (/\bscanf\b|\binput\b/.test(normalized)) {
-      return { label: 'Input', color: 'var(--orange)', text: description };
-    }
-
-    return { label: 'State', color: 'var(--text-mid)', text: description };
   }
 
   $: {
@@ -221,8 +107,8 @@
     </div>
 
     <div class="viz-meta">
-      <span class="intent-pill {confidenceClass(intentPrediction.confidence)}">
-        {intentPrediction.primaryLabel} {Math.round(intentPrediction.confidence * 100)}%
+      <span class="intent-pill {confidenceClass(renderModel.intentConfidence)}">
+        {renderModel.intentLabel} {Math.round(renderModel.intentConfidence * 100)}%
       </span>
       <span class:play-live={$isPlaying} class="play-indicator"></span>
     </div>
@@ -287,16 +173,16 @@
         </div>
       </section>
 
-      {#if flowDescriptor}
+      {#if renderModel.flowDescriptor}
         <section class="viz-section">
-          <div class="flow-card" style="--flow-color: {flowDescriptor.color}">
-            <span class="flow-badge">{flowDescriptor.label}</span>
-            <span class="flow-copy">{flowDescriptor.text}</span>
+          <div class="flow-card" style="--flow-color: {renderModel.flowDescriptor.color}">
+            <span class="flow-badge">{renderModel.flowDescriptor.label}</span>
+            <span class="flow-copy">{renderModel.flowDescriptor.text}</span>
           </div>
         </section>
       {/if}
 
-      {#if isPartialSnapshot}
+      {#if renderModel.isPartialSnapshot}
         <section class="viz-section">
           <div class="state-banner">
             <span class="state-banner-title">Program state snapshot</span>
@@ -314,213 +200,61 @@
           <div class="section-rule"></div>
         </div>
         <div class="tag-row">
-          <span class="tag active">{intentPrediction.primaryLabel}</span>
-          {#each intentPrediction.techniques.slice(0, 4) as technique}
-            <span class="tag">{formatTechniqueLabel(technique)}</span>
+          <span class="tag active">{renderModel.intentLabel}</span>
+          {#each renderModel.techniques as technique}
+            <span class="tag">{technique}</span>
           {/each}
           <span class="tag subtle">line {traceStep.lineNo ?? '—'}</span>
         </div>
       </section>
 
-      {#if stackFrames.length > 0}
-        <section class="viz-section">
-          <div class="section-header">
-            <span class="section-label">Call Stack</span>
-            <div class="section-rule"></div>
-          </div>
-          <div class="frame-stack">
-            {#each [...stackFrames].reverse() as frame, reverseIndex}
-              {@const frameIndex = stackFrames.length - 1 - reverseIndex}
-              <article class:frame-active={reverseIndex === 0} class="frame-card">
-                <div class="frame-head">
-                  <div class="frame-name">{frame.name}()</div>
-                  {#if reverseIndex === 0}
-                    <span class="frame-badge">ACTIVE</span>
-                  {/if}
-                </div>
-
-                <div class="var-grid">
-                  {#if Object.keys(frame.locals).length === 0}
-                    <div class="var-empty">empty frame</div>
-                  {:else}
-                    {#each Object.entries(frame.locals) as [name, value]}
-                      <div
-                        class:var-changed={!valuesEqual(previousFrameFor(frameIndex)?.locals[name], value)}
-                        class="var-card"
-                      >
-                        <span class="var-name">{name}</span>
-                        <span class="var-value">{formatValue(value)}</span>
-                      </div>
-                    {/each}
-                  {/if}
-                </div>
-              </article>
-            {/each}
-          </div>
-        </section>
+      {#if renderModel.stackFrames.length > 0}
+        <FrameStackView frames={renderModel.stackFrames} />
       {/if}
 
-      {#if globalFrame && Object.keys(globalFrame.locals).length > 0}
-        <section class="viz-section">
-          <div class="section-header">
-            <span class="section-label">Globals</span>
-            <div class="section-rule"></div>
-          </div>
-          <div class="var-grid">
-            {#each Object.entries(globalFrame.locals) as [name, value]}
-              <div
-                class:var-changed={!valuesEqual(previousGlobalValue(name), value)}
-                class="var-card"
-              >
-                <span class="var-name">{name}</span>
-                <span class="var-value">{formatValue(value)}</span>
-              </div>
-            {/each}
-          </div>
-        </section>
+      {#if renderModel.globalValues.length > 0}
+        <GlobalsView globals={renderModel.globalValues} />
       {/if}
 
-      {#if arrays.length > 0}
-        <section class="viz-section">
-          <div class="section-header">
-            <span class="section-label">Arrays</span>
-            <div class="section-rule"></div>
-          </div>
-          <div class="array-list">
-            {#each arrays as array}
-              <article class="array-card">
-                <div class="array-head">
-                  <span class="array-name">{array.name}</span>
-                  <span class="array-meta">{array.values.length} cells</span>
-                </div>
-                <div class="array-cells">
-                  {#each array.values as cell}
-                    <div class="array-cell">
-                      <span class="array-index">[{cell.idx}]</span>
-                      <span class="array-value">{formatValue(cell.value)}</span>
-                    </div>
-                  {/each}
-                </div>
-              </article>
-            {/each}
-          </div>
-        </section>
+      {#if renderModel.structBlocks.length > 0}
+        <StructBlocksView structBlocks={renderModel.structBlocks} />
       {/if}
 
-      {#if linkedLists.length > 0}
-        <section class="viz-section">
-          <div class="section-header">
-            <span class="section-label">Linked List</span>
-            <div class="section-rule"></div>
-          </div>
-          <div class="list-stack">
-            {#each linkedLists as list}
-              <div class="list-row">
-                {#each list.nodes as node, index}
-                  <div class="list-node-block">
-                    <div class="list-node">{node.label}</div>
-                    {#if index < list.nodes.length - 1}
-                      <span class="list-arrow">-&gt;</span>
-                    {/if}
-                  </div>
-                {/each}
-                <span class="list-null">NULL</span>
-              </div>
-            {/each}
-          </div>
-        </section>
+      {#if renderModel.arrays.length > 0}
+        <ArraysView arrays={renderModel.arrays} />
       {/if}
 
-      {#if stackItems.length > 0}
-        <section class="viz-section">
-          <div class="section-header">
-            <span class="section-label">Stack</span>
-            <div class="section-rule"></div>
-          </div>
-          <div class="linear-structure">
-            {#each stackItems as item}
-              <div class="linear-cell">{formatValue(item)}</div>
-            {/each}
-          </div>
-        </section>
+      {#if renderModel.linkedLists.length > 0}
+        <LinkedListView linkedLists={renderModel.linkedLists} />
       {/if}
 
-      {#if queueItems.length > 0}
-        <section class="viz-section">
-          <div class="section-header">
-            <span class="section-label">Queue</span>
-            <div class="section-rule"></div>
-          </div>
-          <div class="linear-structure">
-            {#each queueItems as item}
-              <div class="linear-cell">{formatValue(item)}</div>
-            {/each}
-          </div>
-        </section>
+      {#if renderModel.pointerRefs.length > 0}
+        <PointerMapView pointerRefs={renderModel.pointerRefs} />
       {/if}
 
-      {#if trees.length > 0}
-        <section class="viz-section">
-          <div class="section-header">
-            <span class="section-label">Binary Tree</span>
-            <div class="section-rule"></div>
-          </div>
-          <div class="tree-stack">
-            {#each trees as tree}
-              <div class="tree-card">
-                {#each tree.levels as level}
-                  <div class="tree-level">
-                    {#each level as node}
-                      {#if node}
-                        <div class="tree-node">{node.label}</div>
-                      {:else}
-                        <div class="tree-node tree-node-empty"></div>
-                      {/if}
-                    {/each}
-                  </div>
-                {/each}
-              </div>
-            {/each}
-          </div>
-        </section>
+      {#if renderModel.stackItems.length > 0}
+        <LinearStructureView label="Stack" values={renderModel.stackItems} />
       {/if}
 
-      {#if graphs.length > 0}
-        <section class="viz-section">
-          <div class="section-header">
-            <span class="section-label">Graph</span>
-            <div class="section-rule"></div>
-          </div>
-          <div class="graph-stack">
-            {#each graphs as graph}
-              <article class="graph-card">
-                <div class="graph-head">
-                  <span class="graph-name">{graph.label}</span>
-                  <span class="graph-meta">{graph.nodes.length} nodes · {graph.edges.length} edges</span>
-                </div>
-                <div class="graph-node-grid">
-                  {#each graph.nodes as node}
-                    <span class="graph-node-chip">{node.label}</span>
-                  {/each}
-                </div>
-                <div class="graph-edge-list">
-                  {#each graph.edges as edge}
-                    <span class="graph-edge-chip">{edge.from} -&gt; {edge.to}</span>
-                  {/each}
-                </div>
-              </article>
-            {/each}
-          </div>
-        </section>
+      {#if renderModel.queueItems.length > 0}
+        <LinearStructureView label="Queue" values={renderModel.queueItems} />
       {/if}
 
-      {#if !hasRenderableSections}
+      {#if renderModel.trees.length > 0}
+        <TreeView trees={renderModel.trees} />
+      {/if}
+
+      {#if renderModel.graphs.length > 0}
+        <GraphView graphs={renderModel.graphs} />
+      {/if}
+
+      {#if !renderModel.hasRenderableSections}
         <RawStateInspector
           title="Program State"
-          reason={normalizedTrace.fallbackReason}
-          {globalFrame}
-          {stackFrames}
-          {memoryEntries}
+          reason={renderModel.fallbackReason}
+          globalFrame={renderModel.rawGlobalFrame}
+          stackFrames={renderModel.rawStackFrames}
+          memoryEntries={renderModel.memoryEntries}
         />
       {/if}
     {/if}
@@ -886,6 +620,10 @@
     word-break: break-word;
   }
 
+  .var-value.var-value-pointer {
+    color: var(--cyan);
+  }
+
   .frame-stack,
   .array-list,
   .list-stack,
@@ -916,11 +654,24 @@
     background: color-mix(in srgb, var(--bg-raised) 86%, var(--bg-deep));
   }
 
+  .frame-head-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .frame-name,
   .array-name {
     color: var(--text-bright);
     font-size: 12px;
     font-weight: 700;
+  }
+
+  .frame-caption {
+    color: color-mix(in srgb, var(--text-mid) 80%, var(--text-dim));
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .frame-badge,
@@ -932,9 +683,25 @@
     letter-spacing: 0.08em;
   }
 
-  .frame-card .var-grid,
   .array-cells {
     padding: 10px;
+  }
+
+  .frame-ref-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 10px 10px;
+  }
+
+  .pointer-chip {
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--cyan) 34%, transparent);
+    background: color-mix(in srgb, var(--cyan) 10%, transparent);
+    color: var(--cyan);
+    font-size: 10px;
+    font-weight: 700;
   }
 
   .var-card {
@@ -1000,12 +767,154 @@
     gap: 8px;
   }
 
-  .list-node,
+  .linked-struct-card {
+    min-width: 132px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--border));
+    background: color-mix(in srgb, var(--bg-raised) 88%, var(--bg-deep));
+    overflow: hidden;
+  }
+
+  .linked-struct-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+    background: color-mix(in srgb, var(--blue) 10%, transparent);
+  }
+
+  .linked-struct-title,
+  .linked-struct-address {
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .linked-struct-title {
+    color: var(--text-bright);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .linked-struct-address {
+    color: var(--cyan);
+  }
+
+  .linked-struct-fields,
+  .struct-field-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .linked-struct-field,
+  .struct-field-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 8px 10px;
+    border-top: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  }
+
+  .linked-struct-field:first-child,
+  .struct-field-row:first-child {
+    border-top: none;
+  }
+
+  .linked-struct-key,
+  .struct-field-name {
+    color: color-mix(in srgb, var(--text-mid) 78%, var(--text-dim));
+    font-size: 10px;
+  }
+
+  .linked-struct-value,
+  .struct-field-value {
+    color: var(--text-bright);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .linked-struct-value.linked-struct-value-pointer,
+  .struct-field-value.struct-field-pointer {
+    color: var(--cyan);
+  }
+
+  .list-arrow {
+    color: var(--blue);
+    font-size: 18px;
+    font-weight: 800;
+  }
+
+  .struct-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+
+  .struct-block {
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--purple) 28%, var(--border));
+    background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+    overflow: hidden;
+  }
+
+  .struct-block.struct-block-inline {
+    border-color: color-mix(in srgb, var(--orange) 26%, var(--border));
+  }
+
+  .struct-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+    background: color-mix(in srgb, var(--purple) 9%, transparent);
+  }
+
+  .struct-head-copy,
+  .struct-badges {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .struct-badges {
+    align-items: flex-end;
+  }
+
+  .struct-title {
+    color: var(--text-bright);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .struct-meta {
+    color: color-mix(in srgb, var(--text-mid) 80%, var(--text-dim));
+    font-size: 10px;
+  }
+
+  .malloc-badge,
+  .struct-address {
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .malloc-badge {
+    color: var(--green);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .struct-address {
+    color: var(--cyan);
+  }
+
   .tree-node {
     width: 42px;
     height: 42px;
     border-radius: 999px;
-    border: 2px solid var(--blue);
+    border: 2px solid var(--orange);
     background: color-mix(in srgb, var(--bg-raised) 84%, var(--bg-deep));
     color: var(--text-bright);
     display: flex;
@@ -1016,12 +925,6 @@
     text-align: center;
     padding: 4px;
     box-sizing: border-box;
-  }
-
-  .list-arrow {
-    color: var(--blue);
-    font-size: 16px;
-    font-weight: 800;
   }
 
   .tree-card {
@@ -1104,6 +1007,22 @@
   .graph-edge-chip {
     border-color: color-mix(in srgb, var(--green) 34%, transparent);
     color: var(--green);
+  }
+
+  .pointer-ref-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .pointer-ref-item {
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--cyan) 28%, transparent);
+    background: color-mix(in srgb, var(--cyan) 8%, transparent);
+    color: var(--cyan);
+    font-size: 10px;
+    font-weight: 700;
   }
 
   .viz-footer-note {

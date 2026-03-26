@@ -109,7 +109,83 @@ fi
 echo ""
 
 # Test 6: AI intent analysis
-echo "Test 6: AI intent analysis"
+echo "Test 6: Trace stdin happy path"
+cat > "$TEMP_DIR/trace-stdin.json" << 'EOF'
+{
+  "code": "int main() {\n  int x = 0;\n  scanf(\"%d\", &x);\n  return x;\n}\n",
+  "input": "42\n",
+  "breakpoints": [4]
+}
+EOF
+TRACE_STDIN_RESULT=$(curl -s -X POST "$API_BASE/api/trace" \
+  -H "Content-Type: application/json" \
+  -d @"$TEMP_DIR/trace-stdin.json")
+echo "$TRACE_STDIN_RESULT" | python3 -m json.tool
+TRACE_STDIN_SUCCESS=$(echo "$TRACE_STDIN_RESULT" | python3 -c "import sys, json; body=json.load(sys.stdin); print(body.get('success', False))")
+TRACE_STDIN_VALUE=$(echo "$TRACE_STDIN_RESULT" | python3 -c "import sys, json; body=json.load(sys.stdin); steps=body.get('steps') or []; frames=((steps[0] if steps else {}).get('runtime') or {}).get('frames') or []; locals_=(frames[0] if frames else {}).get('locals') or {}; print(locals_.get('x', ''))")
+if [ "$TRACE_STDIN_SUCCESS" = "True" ] && [ "$TRACE_STDIN_VALUE" = "42" ]; then
+  echo "✓ Trace stdin is applied to runtime state"
+else
+  echo "✗ Trace stdin did not reach runtime state"
+  exit 1
+fi
+echo ""
+
+echo "Test 7: Reject invalid trace input type"
+TRACE_BAD_INPUT_RESULT=$(curl -s -X POST "$API_BASE/api/trace" \
+  -H "Content-Type: application/json" \
+  -d '{"code":"int main() { return 0; }\n","input":123}')
+echo "$TRACE_BAD_INPUT_RESULT" | python3 -m json.tool
+TRACE_BAD_INPUT_ERROR=$(echo "$TRACE_BAD_INPUT_RESULT" | python3 -c "import sys, json; body=json.load(sys.stdin); errs=body.get('errors') or []; print(errs[0] if errs else '')")
+if [ "$TRACE_BAD_INPUT_ERROR" = "\"input\" must be a string when provided" ]; then
+  echo "✓ Invalid trace input is rejected cleanly"
+else
+  echo "✗ Invalid trace input was not handled cleanly"
+  exit 1
+fi
+echo ""
+
+echo "Test 8: Trace rejects unsupported syntax cleanly"
+cat > "$TEMP_DIR/trace-unsupported.json" << 'EOF'
+{
+  "code": "#include <stdio.h>\nint main() {\n  int x = 2;\n  switch (x) {\n    case 2: return 0;\n    default: return 1;\n  }\n}\n"
+}
+EOF
+TRACE_UNSUPPORTED_RESULT=$(curl -s -X POST "$API_BASE/api/trace" \
+  -H "Content-Type: application/json" \
+  -d @"$TEMP_DIR/trace-unsupported.json")
+echo "$TRACE_UNSUPPORTED_RESULT" | python3 -m json.tool
+TRACE_UNSUPPORTED_SUCCESS=$(echo "$TRACE_UNSUPPORTED_RESULT" | python3 -c "import sys, json; body=json.load(sys.stdin); print(body.get('success', True))")
+TRACE_UNSUPPORTED_CLEAR=$(echo "$TRACE_UNSUPPORTED_RESULT" | python3 -c "import sys, json; body=json.load(sys.stdin); errs=body.get('errors') or []; print(bool(errs) and 'does not support switch/case' in errs[0])")
+if [ "$TRACE_UNSUPPORTED_SUCCESS" = "False" ] && [ "$TRACE_UNSUPPORTED_CLEAR" = "True" ]; then
+  echo "✓ Unsupported trace syntax returns a controlled error"
+else
+  echo "✗ Unsupported trace syntax was not handled cleanly"
+  exit 1
+fi
+echo ""
+
+echo "Test 9: Trace stops runaway loops cleanly"
+cat > "$TEMP_DIR/trace-runaway.json" << 'EOF'
+{
+  "code": "int main() {\n  while (1) {\n  }\n  return 0;\n}\n"
+}
+EOF
+TRACE_RUNAWAY_RESULT=$(curl -s -X POST "$API_BASE/api/trace" \
+  -H "Content-Type: application/json" \
+  -d @"$TEMP_DIR/trace-runaway.json")
+echo "$TRACE_RUNAWAY_RESULT" | python3 -c "import sys, json; body=json.load(sys.stdin); print(json.dumps({'success': body.get('success'), 'totalSteps': body.get('totalSteps'), 'errors': body.get('errors'), 'phase': body.get('phase')}, indent=4))"
+TRACE_RUNAWAY_SUCCESS=$(echo "$TRACE_RUNAWAY_RESULT" | python3 -c "import sys, json; body=json.load(sys.stdin); print(body.get('success', True))")
+TRACE_RUNAWAY_CLEAR=$(echo "$TRACE_RUNAWAY_RESULT" | python3 -c "import sys, json; body=json.load(sys.stdin); errs=body.get('errors') or []; print(bool(errs) and 'maximum step limit' in errs[0])")
+if [ "$TRACE_RUNAWAY_SUCCESS" = "False" ] && [ "$TRACE_RUNAWAY_CLEAR" = "True" ]; then
+  echo "✓ Runaway loops return a controlled step-limit error"
+else
+  echo "✗ Runaway loop trace was not handled cleanly"
+  exit 1
+fi
+echo ""
+
+echo "Test 10: AI intent analysis"
 cat > "$TEMP_DIR/analyze.json" << 'EOF'
 {
   "code": "#include <stdio.h>\n\nint binary_search(int *arr, int n, int target) {\n    int low = 0;\n    int high = n - 1;\n    while (low <= high) {\n        int mid = low + (high - low) / 2;\n        if (arr[mid] == target) return mid;\n        if (arr[mid] < target) low = mid + 1;\n        else high = mid - 1;\n    }\n    return -1;\n}\n"
@@ -129,8 +205,8 @@ else
 fi
 echo ""
 
-# Test 7: Reject unsafe binary path
-echo "Test 7: Reject unsafe binary path"
+# Test 11: Reject unsafe binary path
+echo "Test 11: Reject unsafe binary path"
 cat > "$TEMP_DIR/unsafe-run.json" << 'EOF'
 {
   "binaryPath": "/bin/ls",

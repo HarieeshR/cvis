@@ -1,0 +1,457 @@
+.viz-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-label {
+  color: color-mix(in srgb, var(--text-mid) 78%, var(--text-dim));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.section-rule {
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.var-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.var-card,
+.array-card,
+.frame-card,
+.tree-card {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+}
+
+.var-name,
+.array-index {
+  color: color-mix(in srgb, var(--text-mid) 80%, var(--text-dim));
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.var-value {
+  color: var(--text-bright);
+  font-size: 14px;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.var-value.var-value-pointer {
+  color: var(--cyan);
+}
+
+.frame-stack,
+.array-list,
+.list-stack,
+.tree-stack,
+.graph-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.frame-card {
+  overflow: hidden;
+}
+
+.frame-card.frame-active {
+  border-color: color-mix(in srgb, var(--blue) 48%, var(--border));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--blue) 16%, transparent);
+}
+
+.frame-head,
+.array-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-raised) 86%, var(--bg-deep));
+}
+
+.frame-head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.frame-name,
+.array-name {
+  color: var(--text-bright);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.frame-caption {
+  color: color-mix(in srgb, var(--text-mid) 80%, var(--text-dim));
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.frame-badge,
+.array-meta,
+.list-null {
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.frame-card .var-grid,
+.array-cells {
+  padding: 10px;
+}
+
+.frame-ref-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+
+.pointer-chip {
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cyan) 34%, transparent);
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.var-card {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.var-card.var-changed {
+  border-color: color-mix(in srgb, var(--blue) 48%, var(--border));
+  background: color-mix(in srgb, var(--blue) 12%, var(--bg-raised));
+}
+
+.var-empty {
+  color: color-mix(in srgb, var(--text-mid) 80%, var(--text-dim));
+  font-size: 11px;
+  font-style: italic;
+  padding: 10px 2px;
+}
+
+.array-cells,
+.linear-structure {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.array-cell,
+.linear-cell {
+  min-width: 54px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 70%, var(--bg-deep));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.array-value,
+.linear-cell {
+  color: var(--text-bright);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+}
+
+.list-node-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.linked-struct-card {
+  min-width: 132px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--border));
+  background: color-mix(in srgb, var(--bg-raised) 88%, var(--bg-deep));
+  overflow: hidden;
+}
+
+.linked-struct-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--blue) 10%, transparent);
+}
+
+.linked-struct-title,
+.linked-struct-address {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.linked-struct-title {
+  color: var(--text-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.linked-struct-address {
+  color: var(--cyan);
+}
+
+.linked-struct-fields,
+.struct-field-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.linked-struct-field,
+.struct-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+}
+
+.linked-struct-field:first-child,
+.struct-field-row:first-child {
+  border-top: none;
+}
+
+.linked-struct-key,
+.struct-field-name {
+  color: color-mix(in srgb, var(--text-mid) 78%, var(--text-dim));
+  font-size: 10px;
+}
+
+.linked-struct-value,
+.struct-field-value {
+  color: var(--text-bright);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.linked-struct-value.linked-struct-value-pointer,
+.struct-field-value.struct-field-pointer {
+  color: var(--cyan);
+}
+
+.list-arrow {
+  color: var(--blue);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.struct-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.struct-block {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--purple) 28%, var(--border));
+  background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+  overflow: hidden;
+}
+
+.struct-block.struct-block-inline {
+  border-color: color-mix(in srgb, var(--orange) 26%, var(--border));
+}
+
+.struct-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--purple) 9%, transparent);
+}
+
+.struct-head-copy,
+.struct-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.struct-badges {
+  align-items: flex-end;
+}
+
+.struct-title {
+  color: var(--text-bright);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.struct-meta {
+  color: color-mix(in srgb, var(--text-mid) 80%, var(--text-dim));
+  font-size: 10px;
+}
+
+.malloc-badge,
+.struct-address {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.malloc-badge {
+  color: var(--green);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.struct-address {
+  color: var(--cyan);
+}
+
+.tree-node {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 2px solid var(--orange);
+  background: color-mix(in srgb, var(--bg-raised) 84%, var(--bg-deep));
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.tree-card {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-x: auto;
+}
+
+.tree-level {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  min-width: max-content;
+}
+
+.tree-node-empty {
+  opacity: 0;
+}
+
+.graph-card {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-deep) 88%, transparent);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.graph-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.graph-name {
+  color: var(--text-bright);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.graph-meta {
+  color: color-mix(in srgb, var(--text-mid) 80%, var(--text-dim));
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.graph-node-grid,
+.graph-edge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.graph-node-chip,
+.graph-edge-chip {
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 76%, var(--bg-deep));
+  color: var(--text-bright);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.graph-node-chip {
+  border-color: color-mix(in srgb, var(--cyan) 38%, transparent);
+  color: var(--cyan);
+}
+
+.graph-edge-chip {
+  border-color: color-mix(in srgb, var(--green) 34%, transparent);
+  color: var(--green);
+}
+
+.pointer-ref-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pointer-ref-item {
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cyan) 28%, transparent);
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 700;
+}

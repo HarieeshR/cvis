@@ -3,7 +3,7 @@
 A web-based visualization tool for learning Data Structures and Algorithms in C.
 
 ## Tech Stack
-- **Frontend:** SvelteKit + TypeScript + Tailwind CSS + Vite
+- **Frontend:** SvelteKit + TypeScript + Tailwind CSS + Vite + Node adapter
 - **Backend:** Express.js + Node.js
 - **Compiler:** GCC (Docker-based or local)
 
@@ -205,6 +205,63 @@ The backend health response now reports:
 - `toolchainVersion`
 
 so you can verify which compiler is active.
+
+### Production Deployment
+
+The frontend now has an explicit Node deployment target, so the production build is runnable instead of relying on adapter auto-detection.
+
+**Build the app**
+
+```bash
+npm install
+cd server && npm install && cd ..
+npm run build
+```
+
+**Start the production services**
+
+```bash
+# backend only
+npm run start:backend
+
+# frontend only (serves the SvelteKit production build)
+npm run start:frontend
+
+# both together with production env defaults
+npm run start:prod
+```
+
+**Important production env vars**
+
+```bash
+# frontend runtime API base when frontend and backend are split services
+PUBLIC_API_BASE=https://your-backend.example.com
+
+# backend CORS / browser origin configuration
+FRONTEND_URL=https://your-frontend.example.com
+# or multiple origins:
+CORS_ORIGINS=https://app.example.com,https://staging.example.com
+
+# optional ports and hosts
+FRONTEND_PORT=3000
+FRONTEND_HOST=0.0.0.0
+BACKEND_PORT=3001
+BACKEND_HOST=127.0.0.1
+```
+
+**Recommended production shape**
+- run the frontend build with `npm run start:frontend`
+- run the backend with `npm run start:backend`
+- place both behind a reverse proxy
+- proxy `/api` to the backend if you want same-origin browser requests
+- otherwise set `PUBLIC_API_BASE` so the frontend calls the backend directly
+
+**Smoke test the production build locally**
+
+```bash
+npm run build
+npm run smoke:prod
+```
 
 ### Optional: Enable AI Code Understanding
 

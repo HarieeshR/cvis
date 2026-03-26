@@ -59,7 +59,7 @@ async function startServer() {
     console.log(`✓ Toolchain version: ${gccDetails.toolchainVersion}`);
   }
 
-  const host = process.env.DOCKER_ENV ? '0.0.0.0' : 'localhost';
+  const host = process.env.BACKEND_HOST || (process.env.DOCKER_ENV ? '0.0.0.0' : 'localhost');
   const server = app.listen(PORT, host, () => {
     logStartupBanner(host, gccDetails);
   });

@@ -14,6 +14,10 @@
  * - Simplified type system
  */
 
+import { snapshotValue, MAX_TRACE_ARRAY_LENGTH } from './trace/runtime-snapshot.js';
+import { normalizeTraceError } from './trace/trace-errors.js';
+import { detectUnsupportedTraceFeature } from './trace/unsupported-syntax.js';
+
 // ============================================================================
 // TOKENIZER
 // ============================================================================
@@ -25,6 +29,7 @@ const KEYWORDS = new Set([
 ]);
 
 const TYPES = new Set(['int', 'float', 'double', 'char', 'void', 'long', 'short', 'unsigned']);
+const MAX_TRACE_CALL_DEPTH = 256;
 
 function tokenize(code) {
   const tokens = [];
@@ -867,12 +872,11 @@ class Interpreter {
         output: this.output
       };
     } catch (err) {
-      return {
-        success: false,
+      return normalizeTraceError(err, {
         steps: this.steps,
-        totalSteps: this.steps.length,
-        errors: [err.message]
-      };
+        output: this.output,
+        phase: 'runtime'
+      });
     }
   }
 
@@ -881,17 +885,17 @@ class Interpreter {
       throw new Error('Maximum steps exceeded (possible infinite loop)');
     }
 
-    const globals = { ...this.globalVars };
+    const globals = snapshotValue(this.globalVars);
     const frames = this.callStack.map((frame) => ({
       name: frame.name,
-      locals: { ...frame.locals }
+      locals: snapshotValue(frame.locals)
     }));
 
     // Keep a flattened memory map for existing consumers.
     const memory = { ...globals };
     for (const frame of frames) {
       for (const [k, v] of Object.entries(frame.locals)) {
-        memory[`${frame.name}.${k}`] = v;
+        memory[`${frame.name}.${k}`] = snapshotValue(v);
       }
     }
 
@@ -905,7 +909,8 @@ class Interpreter {
     const runtime = {
       globals,
       frames,
-      flatMemory: memory
+      flatMemory: memory,
+      heap: snapshotValue(Object.fromEntries(this.heap))
     };
 
     // Preserve the older pseudo-global frame shape for compatibility.
@@ -1032,6 +1037,11 @@ class Interpreter {
             ? Math.max(0, Math.trunc(node.size))
             : 0;
         const size = declaredSize || (node.init?.elements?.length || 0);
+        if (size > MAX_TRACE_ARRAY_LENGTH) {
+          throw new Error(
+            `Trace array limit exceeded (${size}). The trace engine supports arrays up to ${MAX_TRACE_ARRAY_LENGTH} elements. Use compile/run for larger inputs.`
+          );
+        }
         const arr = new Array(size).fill(0);
         if (node.init?.elements) {
           for (let i = 0; i < node.init.elements.length && i < size; i++) {
@@ -1318,6 +1328,9 @@ class Interpreter {
         // User-defined function
         const func = this.ast.functions[funcName];
         if (!func) return 0;
+        if (this.callStack.length >= MAX_TRACE_CALL_DEPTH) {
+          throw new Error(`Trace call-depth limit exceeded at ${funcName}`);
+        }
 
         // Create new stack frame
         const frame = { name: funcName, locals: {}, returnAddr: node.line };
@@ -1355,6 +1368,11 @@ class Interpreter {
 
 export async function traceExecution(code, breakpoints = [], input = '') {
   try {
+    const unsupportedFeatureResult = detectUnsupportedTraceFeature(code);
+    if (unsupportedFeatureResult) {
+      return unsupportedFeatureResult;
+    }
+
     const rawTokens = tokenize(code);
     const tokens = applyDefines(rawTokens);
     const parser = new Parser(tokens);
@@ -1384,11 +1402,6 @@ export async function traceExecution(code, breakpoints = [], input = '') {
       totalSteps: filteredSteps.length
     };
   } catch (err) {
-    return {
-      success: false,
-      steps: [],
-      totalSteps: 0,
-      errors: [err.message || 'Parse error']
-    };
+    return normalizeTraceError(err, { steps: [], phase: 'trace' });
   }
 }

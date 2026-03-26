@@ -17,9 +17,43 @@ export const TOOLCHAIN_INSTALLS_DIR = path.join(TOOLCHAIN_DIR, 'toolchains');
 export const TOOLCHAIN_METADATA_PATH = path.join(TOOLCHAIN_DIR, 'install.json');
 export const TOOLCHAIN_MANIFEST_PATH = path.join(SCRIPT_DIR, 'toolchain-manifest.json');
 
+function safeParseJson(raw, label) {
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid JSON in ${label}: ${message}`);
+  }
+}
+
+function normalizeInstalledToolchainMetadata(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const metadata = {
+    installId: typeof value.installId === 'string' ? value.installId : null,
+    version: typeof value.version === 'string' ? value.version : null,
+    platform: typeof value.platform === 'string' ? value.platform : null,
+    arch: typeof value.arch === 'string' ? value.arch : null,
+    gccPath: typeof value.gccPath === 'string' ? value.gccPath : null,
+    binDir: typeof value.binDir === 'string' ? value.binDir : null,
+    extractedTo: typeof value.extractedTo === 'string' ? value.extractedTo : null,
+    assetName: typeof value.assetName === 'string' ? value.assetName : null,
+    installedAt: typeof value.installedAt === 'string' ? value.installedAt : null,
+    sha256: typeof value.sha256 === 'string' ? value.sha256 : null
+  };
+
+  return metadata.gccPath ? metadata : null;
+}
+
 export async function loadToolchainManifest() {
   const raw = await fs.readFile(TOOLCHAIN_MANIFEST_PATH, 'utf8');
-  return JSON.parse(raw);
+  const manifest = safeParseJson(raw, path.relative(PROJECT_ROOT, TOOLCHAIN_MANIFEST_PATH));
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) || typeof manifest.targets !== 'object') {
+    throw new Error('Invalid toolchain manifest: missing "targets" object.');
+  }
+  return manifest;
 }
 
 export function currentTargetKey(platform = process.platform, arch = process.arch) {
@@ -133,7 +167,9 @@ export async function readInstalledToolchain() {
 
   try {
     const raw = await fs.readFile(TOOLCHAIN_METADATA_PATH, 'utf8');
-    return JSON.parse(raw);
+    return normalizeInstalledToolchainMetadata(
+      safeParseJson(raw, path.relative(PROJECT_ROOT, TOOLCHAIN_METADATA_PATH))
+    );
   } catch {
     return null;
   }

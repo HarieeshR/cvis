@@ -208,7 +208,7 @@ const PROFILES: IntentProfile[] = [
   }
 ];
 
-const LABEL_BY_INTENT: Record<ProgramIntentType, string> = {
+export const INTENT_LABELS: Record<ProgramIntentType, string> = {
   sorting: 'Sorting',
   searching: 'Searching',
   'linked-list': 'Linked List',
@@ -440,10 +440,10 @@ function describeKeywordSignal(intent: ProgramIntentType, keyword: string): stri
 
 function describeAliasSignal(intent: ProgramIntentType, alias: string): string {
   if (alias.length <= 2) {
-    return `uses ${wrapCode(alias)} as a shorthand for ${LABEL_BY_INTENT[intent].toLowerCase()}`;
+    return `uses ${wrapCode(alias)} as a shorthand for ${INTENT_LABELS[intent].toLowerCase()}`;
   }
 
-  return `uses ${wrapCode(alias)} as a shorthand for ${LABEL_BY_INTENT[intent].toLowerCase()}`;
+  return `uses ${wrapCode(alias)} as a shorthand for ${INTENT_LABELS[intent].toLowerCase()}`;
 }
 
 function describePatternSignal(intent: ProgramIntentType, signal: string): string {
@@ -784,11 +784,11 @@ export function predictProgramIntent(code: string): ProgramIntentPrediction {
   if (candidates.length === 0) {
     return {
       primaryIntent: 'generic',
-      primaryLabel: LABEL_BY_INTENT.generic,
+      primaryLabel: INTENT_LABELS.generic,
       confidence: 0.35,
       matchedSignals: [],
       techniques: fallbackTechniques,
-      candidates: [{ intent: 'generic', label: LABEL_BY_INTENT.generic, score: 1 }]
+      candidates: [{ intent: 'generic', label: INTENT_LABELS.generic, score: 1 }]
     };
   }
 

@@ -4,6 +4,14 @@ export function getErrorMessage(err, fallback = 'Internal server error') {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+export function normalizeJsonBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { error: 'Request body must be a JSON object' };
+  }
+
+  return { value: body };
+}
+
 export function validateCode(code) {
   if (typeof code !== 'string') {
     return 'Request body must contain a string "code" field';

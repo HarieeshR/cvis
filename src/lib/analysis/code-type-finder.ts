@@ -1,8 +1,10 @@
 import {
+  INTENT_LABELS,
   predictProgramIntent,
   type ProgramIntentCandidate,
   type ProgramIntentType
 } from '$lib/visualizer/program-intent';
+import { classifyProgramBehavior } from '$lib/analysis/behavior-classifier';
 
 // This module intentionally uses lightweight heuristic scoring (no heavy ML runtime)
 // so analysis stays responsive on normal CPU-only environments.
@@ -337,20 +339,6 @@ const PROBLEM_BANK: Record<ProgramIntentType, PracticeRecommendation[]> = {
       ]
     }
   ]
-};
-
-const INTENT_LABELS: Record<ProgramIntentType, string> = {
-  sorting: 'Sorting',
-  searching: 'Searching',
-  'linked-list': 'Linked List',
-  stack: 'Stack',
-  queue: 'Queue',
-  tree: 'Tree / BST',
-  graph: 'Graph',
-  'dynamic-programming': 'Dynamic Programming',
-  recursion: 'Recursion',
-  matrix: 'Matrix / Grid',
-  generic: 'Generic'
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -721,6 +709,73 @@ export function getPracticeRecommendationsForIntent(intent: ProgramIntentType): 
   return [...(PROBLEM_BANK[intent] ?? PROBLEM_BANK.generic)];
 }
 
+function mergePredictions(
+  staticPrediction: ReturnType<typeof predictProgramIntent>,
+  source: string
+): ReturnType<typeof predictProgramIntent> {
+  const behaviorPrediction = classifyProgramBehavior(source);
+  const behaviorShouldLead =
+    behaviorPrediction.primaryIntent !== 'generic' &&
+    (staticPrediction.primaryIntent === 'generic' ||
+      behaviorPrediction.confidence >= staticPrediction.confidence + 0.08);
+
+  const primaryIntent = behaviorShouldLead
+    ? behaviorPrediction.primaryIntent
+    : staticPrediction.primaryIntent;
+  const primaryLabel = behaviorShouldLead
+    ? behaviorPrediction.primaryLabel
+    : staticPrediction.primaryLabel;
+  const confidence = behaviorShouldLead
+    ? behaviorPrediction.confidence
+    : Math.max(staticPrediction.confidence, behaviorPrediction.confidence * 0.92);
+
+  const candidateScores = new Map<ProgramIntentType, number>();
+
+  for (const candidate of staticPrediction.candidates) {
+    candidateScores.set(candidate.intent, (candidateScores.get(candidate.intent) ?? 0) + candidate.score);
+  }
+
+  for (const candidate of behaviorPrediction.candidates) {
+    candidateScores.set(
+      candidate.intent,
+      Math.max(candidateScores.get(candidate.intent) ?? 0, candidate.score)
+    );
+  }
+
+  if (!candidateScores.has(primaryIntent)) {
+    candidateScores.set(primaryIntent, 1);
+  }
+
+  const candidates: ProgramIntentCandidate[] = Array.from(candidateScores.entries())
+    .map(([intent, score]) => ({
+      intent,
+      label: INTENT_LABELS[intent],
+      score
+    }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 6);
+
+  const techniques = [...staticPrediction.techniques];
+  if (
+    primaryIntent !== 'generic' &&
+    !techniques.includes(primaryIntent as (typeof techniques)[number]) &&
+    ['linked-list', 'stack', 'queue', 'tree', 'graph', 'sorting', 'recursion', 'dynamic-programming'].includes(primaryIntent)
+  ) {
+    techniques.unshift(primaryIntent as (typeof techniques)[number]);
+  }
+
+  return {
+    primaryIntent,
+    primaryLabel,
+    confidence,
+    matchedSignals: Array.from(
+      new Set([...behaviorPrediction.matchedSignals, ...staticPrediction.matchedSignals])
+    ).slice(0, 6),
+    techniques: techniques.slice(0, 6),
+    candidates
+  };
+}
+
 const COMPLEXITY_ORDER: Record<string, number> = {
   'O(1)': 1,
   'O(log n)': 2,
@@ -808,11 +863,11 @@ export function analyzeCodeType(code: string): CodeTypeReport {
     };
   }
 
-  const programPrediction = predictProgramIntent(normalized);
+  const programPrediction = mergePredictions(predictProgramIntent(normalized), normalized);
   const rawSections = extractSections(normalized);
 
   const sectionPredictions = rawSections.map((section) => {
-    const prediction = predictProgramIntent(section.source);
+    const prediction = mergePredictions(predictProgramIntent(section.source), section.source);
     const lengthWeight = clamp(section.endLine - section.startLine + 1, 1, 300);
     return {
       section,

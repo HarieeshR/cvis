@@ -80,6 +80,7 @@ function getInitialTraceStepIndex(steps: TraceStepFrameCarrier[]): number {
 }
 
 const RUN_POLL_INTERVAL_MS = 120;
+const RUN_POLL_RETRY_LIMIT = 3;
 let activeRunSessionId: string | null = null;
 let activeRunOutputCursor = '';
 let activeRunInputClosed = false;
@@ -276,6 +277,7 @@ export async function runCompileAction({
 
 export async function runBinaryAction(binaryPath: string | null): Promise<void> {
   let startedSessionId: string | null = null;
+  let consecutivePollFailures = 0;
 
   try {
     if (!binaryPath) {
@@ -310,7 +312,21 @@ export async function runBinaryAction(binaryPath: string | null): Promise<void> 
     });
 
     while (activeRunSessionId === startedSessionId) {
-      const poll = await pollRunSession(startedSessionId);
+      let poll;
+      try {
+        poll = await pollRunSession(startedSessionId);
+        consecutivePollFailures = 0;
+      } catch (err) {
+        consecutivePollFailures += 1;
+
+        if (consecutivePollFailures >= RUN_POLL_RETRY_LIMIT) {
+          throw err;
+        }
+
+        await delay(RUN_POLL_INTERVAL_MS * consecutivePollFailures);
+        continue;
+      }
+
       const mergedOutput = poll.output ?? `${poll.stdout}${poll.stderr}`;
 
       if (mergedOutput.startsWith(activeRunOutputCursor)) {

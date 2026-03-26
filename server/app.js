@@ -5,8 +5,17 @@ import { getErrorMessage } from './lib/http/request-validation.js';
 import { registerRoutes } from './routes/index.js';
 
 function resolveCorsOrigin() {
+  const explicitOrigins = process.env.CORS_ORIGINS
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (explicitOrigins && explicitOrigins.length > 0) {
+    return explicitOrigins.length === 1 ? explicitOrigins[0] : explicitOrigins;
+  }
+
   if (process.env.NODE_ENV === 'production') {
-    return process.env.FRONTEND_URL;
+    return process.env.FRONTEND_URL || false;
   }
 
   return DEV_CORS_ORIGINS;
@@ -27,13 +36,27 @@ export function createApp() {
 
   registerRoutes(app);
 
-  app.use((req, res) => {
-    res.status(404).json({ error: 'Endpoint not found' });
-  });
-
   app.use((err, _req, res, _next) => {
+    if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && err?.status === 400 && 'body' in err)) {
+      return res.status(400).json({
+        error: 'Invalid JSON body',
+        message: 'Request body must be valid JSON.'
+      });
+    }
+
+    if (err?.type === 'entity.too.large') {
+      return res.status(413).json({
+        error: 'Request body too large',
+        message: `Request body exceeds the configured limit of ${JSON_BODY_LIMIT}.`
+      });
+    }
+
     console.error('Unhandled error:', err);
     res.status(500).json({ error: 'Internal server error', message: getErrorMessage(err) });
+  });
+
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Endpoint not found' });
   });
 
   return app;

@@ -43,6 +43,18 @@ node index.js
 
 The server will start on port 3001 and verify GCC is available.
 
+### Production backend env
+
+```bash
+PORT=3001
+BACKEND_HOST=127.0.0.1
+FRONTEND_URL=https://your-frontend.example.com
+# or multiple allowed browser origins:
+CORS_ORIGINS=https://app.example.com,https://staging.example.com
+```
+
+If the frontend and backend are deployed behind the same reverse proxy, you can usually keep browser traffic same-origin by routing `/api` to the backend service.
+
 ### Start in Docker (fallback)
 
 From the repo root:
@@ -159,7 +171,7 @@ Success Response:
 {
   "success": true,
   "binary": "/tmp/code_1234567890.out",
-  "output": "Compiled successfully to /tmp/code_1234567890.out",
+  "output": "Compiled successfully",
   "errors": [],
   "warnings": [],
   "compilationTime": 50

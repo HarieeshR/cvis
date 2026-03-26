@@ -11,6 +11,21 @@ const SERVER_ROOT = path.resolve(SERVER_LIB_DIR, '..');
 const PROJECT_ROOT = path.resolve(SERVER_ROOT, '..');
 const TOOLCHAIN_METADATA_PATH = path.join(PROJECT_ROOT, '.cvis-toolchain', 'install.json');
 
+function normalizeInstalledToolchainMetadata(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  return typeof value.gccPath === 'string'
+    ? {
+        gccPath: value.gccPath,
+        version: typeof value.version === 'string' ? value.version : null,
+        platform: typeof value.platform === 'string' ? value.platform : null,
+        arch: typeof value.arch === 'string' ? value.arch : null
+      }
+    : null;
+}
+
 function expandCompilerNames(basePath) {
   const variants = [basePath];
   if (!basePath.toLowerCase().endsWith('.exe')) {
@@ -73,7 +88,7 @@ export function getInstalledToolchainMetadata() {
   }
 
   try {
-    return fs.readJsonSync(TOOLCHAIN_METADATA_PATH);
+    return normalizeInstalledToolchainMetadata(fs.readJsonSync(TOOLCHAIN_METADATA_PATH));
   } catch {
     return null;
   }
