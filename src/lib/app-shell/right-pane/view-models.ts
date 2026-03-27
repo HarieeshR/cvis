@@ -1,7 +1,14 @@
 import type { UnifiedAnalysisResult } from '$lib/analysis/unified-analysis';
 import { buildMentorViewModel, type MentorViewModel } from '$lib/mentor/view-model';
 import type { PracticeRecommendation } from '$lib/analysis/code-type-finder';
-import type { AnalyzeIntentResult, CompileResult, ExecutionResult, TraceStep, UserProfile } from '$lib/types';
+import type {
+  AnalyzeIntentResult,
+  CompileResult,
+  ExecutionResult,
+  TraceReadinessResult,
+  TraceStep,
+  UserProfile
+} from '$lib/types';
 import { predictProgramIntent } from '$lib/visualizer/program-intent';
 
 export interface ConsoleViewModel {
@@ -25,6 +32,8 @@ export interface VisualizerViewModel {
   traceConsoleStatus: string;
   isTracing: boolean;
   traceErr: string | null;
+  traceReadiness: TraceReadinessResult | null;
+  showTraceReadinessPrompt: boolean;
   traceSteps: TraceStep[];
   currentTraceStepData: TraceStep | null;
   loadingSteps: string[];
@@ -382,7 +391,9 @@ export function buildVisualizerViewModel({
   currentTraceStepData,
   isTracing,
   traceErr,
-  traceNotice
+  traceNotice,
+  traceReadiness,
+  showTraceReadinessPrompt
 }: {
   editorCode: string;
   runConsoleTranscript: string;
@@ -395,6 +406,8 @@ export function buildVisualizerViewModel({
   isTracing: boolean;
   traceErr: string | null;
   traceNotice: string | null;
+  traceReadiness: TraceReadinessResult | null;
+  showTraceReadinessPrompt: boolean;
 }): VisualizerViewModel {
   const intentPrediction = predictProgramIntent(editorCode);
   const output = runConsoleTranscript
@@ -436,6 +449,8 @@ export function buildVisualizerViewModel({
         : 'optional',
     isTracing,
     traceErr,
+    traceReadiness,
+    showTraceReadinessPrompt,
     traceSteps,
     currentTraceStepData,
     loadingSteps: getLoadingSteps(intentPrediction.primaryLabel),

@@ -22,11 +22,13 @@
     profileEditorOpen,
     userProfile
   } from '$lib/stores';
-  import type { UserProfile } from '$lib/types';
+  import type { TraceReadinessResult, UserProfile } from '$lib/types';
 
   let isTracing = false;
   let traceErr: string | null = null;
   let traceNotice: string | null = null;
+  let traceReadiness: TraceReadinessResult | null = null;
+  let showTraceReadinessPrompt = false;
   let persistenceReady = false;
   let persistTimer: number | null = null;
   let lastEditorCodeSnapshot = '';
@@ -439,6 +441,8 @@
     lastRunInputTranscript.set('');
     traceErr = null;
     traceNotice = null;
+    traceReadiness = null;
+    showTraceReadinessPrompt = false;
   }
 
   function resetTraceUiState() {
@@ -447,6 +451,8 @@
     isPlaying.set(false);
     traceErr = null;
     traceNotice = null;
+    traceReadiness = null;
+    showTraceReadinessPrompt = false;
   }
 
   async function handleCompile() {
@@ -455,7 +461,7 @@
     resetTraceUiState();
     rightPaneTab.set('console');
 
-    await runCompileAction({
+    return runCompileAction({
       code: $editorCode
     });
   }
@@ -469,11 +475,15 @@
     await runBinaryAction($lastBinaryPath);
   }
 
-  async function handleTrace() {
+  async function handleTrace(force = false) {
     if (!browser) return;
 
     traceErr = null;
     traceNotice = null;
+    if (!force) {
+      traceReadiness = null;
+      showTraceReadinessPrompt = false;
+    }
     isPlaying.set(false);
     rightPaneTab.set('visualizer');
 
@@ -492,12 +502,30 @@
     try {
       const result = await runTraceAction({
         code: $editorCode,
-        input: traceInput
+        input: traceInput,
+        force
       });
       traceErr = result.traceErr;
+      traceReadiness = result.readiness;
+      showTraceReadinessPrompt = Boolean(
+        result.readiness && result.readiness.status !== 'supported' && !result.didTrace
+      );
     } finally {
       isTracing = false;
     }
+  }
+
+  async function handleCompileAndRunExact() {
+    if (!browser) return;
+
+    const compileSucceeded = await handleCompile();
+    if (compileSucceeded) {
+      await handleRun();
+    }
+  }
+
+  function handleDismissTraceReadiness() {
+    showTraceReadinessPrompt = false;
   }
 
   function handleProfileSave(event: CustomEvent<{ profile: UserProfile }>) {
@@ -567,12 +595,16 @@
 
     <div class="pane-shell right-shell">
       <RightPane
-        on:trace={handleTrace}
+        on:trace={(event) => handleTrace(event.detail?.force === true)}
+        on:runexact={handleCompileAndRunExact}
+        on:dismisstracereadiness={handleDismissTraceReadiness}
         traceSteps={$traceSteps}
         currentStep={$currentStepIndex}
         {isTracing}
         {traceErr}
         {traceNotice}
+        {traceReadiness}
+        {showTraceReadinessPrompt}
       />
     </div>
   </div>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from 'svelte';
-  import type { TraceStep } from '$lib/types';
+  import type { TraceReadinessResult, TraceStep } from '$lib/types';
   import {
     activeMilestoneIndex,
     editorCode,
@@ -45,9 +45,13 @@
   export let isTracing = false;
   export let traceErr: string | null = null;
   export let traceNotice: string | null = null;
+  export let traceReadiness: TraceReadinessResult | null = null;
+  export let showTraceReadinessPrompt = false;
 
   const dispatch = createEventDispatcher<{
-    trace: void;
+    trace: { force?: boolean };
+    runexact: void;
+    dismisstracereadiness: void;
   }>();
 
   let prevMentorProblemId: string | null = null;
@@ -100,7 +104,9 @@
     currentTraceStepData,
     isTracing,
     traceErr,
-    traceNotice
+    traceNotice,
+    traceReadiness,
+    showTraceReadinessPrompt
   });
   $: mentorViewModel = buildMentorPanelViewModel({
     analysis: unifiedAnalysis,
@@ -170,8 +176,16 @@
     rightPaneTab.set('analysis');
   }
 
-  function triggerTrace() {
-    dispatch('trace');
+  function triggerTrace(force = false) {
+    dispatch('trace', { force });
+  }
+
+  function triggerRunExact() {
+    dispatch('runexact');
+  }
+
+  function dismissTraceReadiness() {
+    dispatch('dismisstracereadiness');
   }
 </script>
 
@@ -203,7 +217,12 @@
     {/if}
 
     {#if $rightPaneTab === 'visualizer'}
-      <VisualizerPanel viewModel={visualizerViewModel} onTrace={triggerTrace} />
+      <VisualizerPanel
+        viewModel={visualizerViewModel}
+        onTrace={triggerTrace}
+        onRunExact={triggerRunExact}
+        onDismissTraceReadiness={dismissTraceReadiness}
+      />
     {/if}
 
     {#if $rightPaneTab === 'analysis'}

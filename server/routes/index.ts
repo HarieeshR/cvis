@@ -9,6 +9,7 @@ import {
   runPollHandler,
   runStartHandler,
   runStopHandler,
+  traceReadinessHandler,
   traceHandler
 } from '../lib/http/route-handlers.ts';
 
@@ -21,6 +22,7 @@ export function registerRoutes(app: AppLike): void {
   app.post('/api/run/input', runInputHandler);
   app.post('/api/run/eof', runEofHandler);
   app.post('/api/run/stop', runStopHandler);
+  app.post('/api/trace/readiness', traceReadinessHandler);
   app.post('/api/trace', traceHandler);
   app.post('/api/analyze/intent', analyzeIntentHandler);
 }
