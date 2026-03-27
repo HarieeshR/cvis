@@ -1,6 +1,5 @@
 # Node
 node_modules/
-Visualizer/
 # Build output
 dist/
 build/
@@ -33,10 +32,6 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
-
-# wasm build artifacts
-public/wasm/*.wasm
-public/wasm/*.mem
 
 # Temporary
 *.tmp

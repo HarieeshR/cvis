@@ -280,19 +280,21 @@
 <style>
   /* Editor Pane Container */
   .editor-pane {
-    width: 50%;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid #3e4451;
-    background: #282c34;
+    border-right: 1px solid var(--border);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 94%, transparent) 0%, color-mix(in srgb, var(--bg-deep) 90%, transparent) 100%);
   }
 
   /* File Tab Styling - VS Code like */
   .file-tab {
     display: flex;
     align-items: stretch;
-    background: #21252b;
-    border-bottom: 1px solid #3e4451;
+    background: color-mix(in srgb, var(--bg-deep) 95%, transparent);
+    border-bottom: 1px solid var(--border);
     height: 35px;
   }
 
@@ -301,10 +303,10 @@
     align-items: center;
     gap: 8px;
     padding: 0 16px;
-    background: #282c34;
-    border-right: 1px solid #3e4451;
+    background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+    border-right: 1px solid var(--border);
     border-top: 2px solid transparent;
-    color: #abb2bf;
+    color: var(--text-mid);
     font-family: var(--font-mono, 'JetBrains Mono', monospace);
     font-size: 12px;
     cursor: pointer;
@@ -312,22 +314,22 @@
   }
 
   .tab-item.active {
-    border-top-color: #61afef;
+    border-top-color: var(--blue);
   }
 
   .tab-item:hover {
-    background: #2c313a;
+    background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
   }
 
   .tab-name {
-    color: #e5e5e5;
+    color: var(--text-bright);
   }
 
   .tab-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #5c6370;
+    background: var(--text-dim);
     opacity: 0;
   }
 
@@ -337,21 +339,21 @@
     flex: 1;
     overflow: hidden;
     position: relative;
-    background: #282c34;
+    background: transparent;
   }
 
   /* Line Number Gutter */
   .line-gutter {
     width: 50px;
     padding: 12px 0;
-    background: #21252b;
-    border-right: 1px solid #3e4451;
+    background: color-mix(in srgb, var(--bg-deep) 95%, transparent);
+    border-right: 1px solid var(--border);
     overflow-y: hidden;
     text-align: right;
     user-select: none;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 12px;
-    color: #5c6370;
+    color: var(--text-dim);
   }
 
   .line-number {
@@ -361,7 +363,7 @@
   }
 
   .line-number.highlighted {
-    color: #61afef;
+    color: var(--blue);
     font-weight: 600;
   }
 
@@ -378,8 +380,8 @@
     left: 0;
     right: 0;
     height: 22px;
-    background: rgba(97, 175, 239, 0.08);
-    border-left: 2px solid #61afef;
+    background: color-mix(in srgb, var(--blue) 10%, transparent);
+    border-left: 2px solid var(--blue);
     pointer-events: none;
     z-index: 2;
     transition: top 0.18s ease;
@@ -391,7 +393,7 @@
     inset: 0;
     margin: 0;
     padding: 12px;
-    color: #abb2bf;
+    color: var(--text-mid);
     pointer-events: none;
     overflow: hidden;
     z-index: 1;
@@ -409,7 +411,7 @@
     background: transparent;
     color: transparent;
     -webkit-text-fill-color: transparent;
-    caret-color: #e5e5e5;
+    caret-color: var(--text-bright);
     resize: none;
     outline: none;
     overflow: auto;

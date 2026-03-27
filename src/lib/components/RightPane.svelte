@@ -27,9 +27,7 @@
     type IntentExplainerViewModel
   } from '$lib/app-shell/right-pane/view-models';
   import {
-    firstIncompleteMilestoneIndex as getFirstIncompleteMilestoneIndex,
-    isMilestoneComplete as isMentorMilestoneComplete,
-    milestoneKey
+    firstIncompleteMilestoneIndex as getFirstIncompleteMilestoneIndex
   } from '$lib/mentor/view-model';
   import {
     interruptRuntimeSession,
@@ -41,7 +39,6 @@
   import ConsolePanel from './right-pane/ConsolePanel.svelte';
   import VisualizerPanel from './right-pane/VisualizerPanel.svelte';
   import AnalysisPanel from './right-pane/AnalysisPanel.svelte';
-  import MentorPanel from './right-pane/MentorPanel.svelte';
 
   export let traceSteps: TraceStep[] = [];
   export let currentStep = 0;
@@ -105,11 +102,6 @@
     traceErr,
     traceNotice
   });
-  $: analysisViewModel = buildAnalysisViewModel({
-    editorCode: $editorCode,
-    analysis: unifiedAnalysis,
-    intentExplainer: intentExplainerState
-  });
   $: mentorViewModel = buildMentorPanelViewModel({
     analysis: unifiedAnalysis,
     userProfile: $userProfile,
@@ -117,6 +109,12 @@
     selectedPracticeProblemId: $selectedPracticeProblemId,
     activeMilestoneIndex: $activeMilestoneIndex,
     milestoneProgress: $milestoneProgress
+  });
+  $: analysisViewModel = buildAnalysisViewModel({
+    editorCode: $editorCode,
+    analysis: unifiedAnalysis,
+    intentExplainer: intentExplainerState,
+    mentor: mentorViewModel
   });
   $: recommendedProblems = analysisViewModel.recommendedProblems;
   $: guidedMentorSelection = mentorViewModel.personalizedMentorQueue[0] ?? null;
@@ -151,7 +149,7 @@
     mentorSelectionMode.set('manual');
     selectedPracticeProblemId.set(recommendation.id);
     activeMilestoneIndex.set(getFirstIncompleteMilestoneIndex($milestoneProgress, recommendation));
-    rightPaneTab.set('mentor');
+    rightPaneTab.set('analysis');
   }
 
   function activateGuidedMentorPlan() {
@@ -161,7 +159,7 @@
         getFirstIncompleteMilestoneIndex($milestoneProgress, guidedMentorSelection.recommendation)
       );
     }
-    rightPaneTab.set('mentor');
+    rightPaneTab.set('analysis');
   }
 
   function activateManualMentorPlan(recommendation: (typeof recommendedProblems)[number] | null) {
@@ -169,46 +167,7 @@
     mentorSelectionMode.set('manual');
     selectedPracticeProblemId.set(recommendation.id);
     activeMilestoneIndex.set(getFirstIncompleteMilestoneIndex($milestoneProgress, recommendation));
-    rightPaneTab.set('mentor');
-  }
-
-  function focusMilestone(milestoneIndex: number) {
-    activeMilestoneIndex.set(milestoneIndex);
-  }
-
-  function toggleMentorMilestone(
-    recommendation: (typeof recommendedProblems)[number],
-    milestoneIndex: number
-  ) {
-    const key = milestoneKey(recommendation.id, milestoneIndex);
-    const nextCompleted = !Boolean($milestoneProgress[key]);
-
-    milestoneProgress.update((current) => ({
-      ...current,
-      [key]: nextCompleted
-    }));
-
-    if (nextCompleted) {
-      const nextIncomplete = recommendation.milestones.findIndex(
-        (_milestone, nextIndex) =>
-          nextIndex > milestoneIndex &&
-          !Boolean($milestoneProgress[milestoneKey(recommendation.id, nextIndex)])
-      );
-      activeMilestoneIndex.set(nextIncomplete >= 0 ? nextIncomplete : milestoneIndex);
-      return;
-    }
-
-    activeMilestoneIndex.set(milestoneIndex);
-  }
-
-  function isMilestoneComplete(problemId: string, milestoneIndex: number): boolean {
-    return isMentorMilestoneComplete($milestoneProgress, problemId, milestoneIndex);
-  }
-
-  function firstIncompleteMilestoneIndex(
-    recommendation: (typeof recommendedProblems)[number]
-  ): number {
-    return getFirstIncompleteMilestoneIndex($milestoneProgress, recommendation);
+    rightPaneTab.set('analysis');
   }
 
   function triggerTrace() {
@@ -255,16 +214,5 @@
       />
     {/if}
 
-    {#if $rightPaneTab === 'mentor'}
-      <MentorPanel
-        viewModel={mentorViewModel}
-        onActivateGuidedMentorPlan={activateGuidedMentorPlan}
-        onActivateManualMentorPlan={activateManualMentorPlan}
-        onFocusMilestone={focusMilestone}
-        onToggleMentorMilestone={toggleMentorMilestone}
-        isMilestoneComplete={isMilestoneComplete}
-        firstIncompleteMilestoneIndex={firstIncompleteMilestoneIndex}
-      />
-    {/if}
   </div>
 </div>
